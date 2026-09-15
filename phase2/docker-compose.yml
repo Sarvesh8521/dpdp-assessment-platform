@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  backend:
+    build: 
+      context: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://dpdp:secret@postgres:5432/dpdp_scanner
+      - REDIS_URL=redis://redis:6379/0
+      - ENVIRONMENT=development
+      - CORS_ORIGINS=["http://localhost:5173"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+
+  worker:
+    build:
+      context: ./backend
+    command: celery -A app.workers.celery_app worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://dpdp:secret@postgres:5432/dpdp_scanner
+      - REDIS_URL=redis://redis:6379/0
+      - ENVIRONMENT=development
+    depends_on:
+      - backend
+      - redis
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:8000/api/v1
+    depends_on:
+      - backend
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=dpdp
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=dpdp_scanner
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dpdp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:

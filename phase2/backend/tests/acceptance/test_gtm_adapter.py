@@ -4,29 +4,35 @@ from app.integrations.gtm.adapter import GTMAdapter
 from app.integrations.base.adapter import ConnectionInfo
 from app.domain.evidence import Verdict, Confidence
 
+from unittest.mock import patch, AsyncMock
+
 @pytest.mark.asyncio
-async def test_gtm_20_tag_fixture(mocker):
+@patch("app.integrations.gtm.adapter.AuditedHTTPClient")
+async def test_gtm_20_tag_fixture(mock_client_class):
     adapter = GTMAdapter()
     connection = ConnectionInfo(provider="gtm", scopes=["read"], connected_at=datetime.now(timezone.utc))
     
-    mock_client_class = mocker.patch("app.integrations.gtm.adapter.AuditedHTTPClient")
     mock_instance = mock_client_class.return_value
-    mock_instance.get = mocker.AsyncMock()
-    mock_instance.close = mocker.AsyncMock()
+    mock_instance.get = AsyncMock()
+    mock_instance.close = AsyncMock()
     
     # Create 20 tags: 5 with consent configured, 15 without
     tags = []
     for i in range(5):
         tags.append({
+            "tagId": f"t_conf_{i}",
             "name": f"Configured Tag {i}",
             "type": "html",
-            "consentSettings": {"consentStatus": "needed"}
+            "consentSettings": {"consentStatus": "needed"},
+            "firingTriggerId": ["trig1"]
         })
     for i in range(15):
         tags.append({
+            "tagId": f"t_unconf_{i}",
             "name": f"Unconfigured Tag {i}",
             "type": "html",
-            "consentSettings": {"consentStatus": "notSet"}
+            "consentSettings": {"consentStatus": "notSet"},
+            "firingTriggerId": ["trig2"]
         })
         
     async def mock_get(endpoint, **kwargs):
@@ -35,25 +41,65 @@ async def test_gtm_20_tag_fixture(mocker):
         elif "containers" in endpoint and "versions:live" not in endpoint and "version_headers" not in endpoint:
             return {"container": [{"containerId": "456", "name": "Test Container", "publicId": "GTM-XXXX"}]}
         elif "versions:live" in endpoint:
-            return {"tag": tags, "trigger": [], "variable": []}
+            return {
+                "tag": tags, 
+                "trigger": [
+                    {"triggerId": "trig1", "name": "All Pages"},
+                    {"triggerId": "trig2", "name": "Window Loaded"}
+                ], 
+                "variable": []
+            }
         elif "version_headers" in endpoint:
-            return {"containerVersionHeader": []}
+            return {"containerVersionHeader": [
+                {
+                    "containerVersionId": "v1",
+                    "name": "Initial Publish",
+                    "numTags": 10,
+                    "numTriggers": 2
+                },
+                {
+                    "containerVersionId": "v2",
+                    "name": "Consent Update",
+                    "numTags": 20,
+                    "numTriggers": 2
+                }
+            ]}
         return {}
         
     mock_instance.get.side_effect = mock_get
     
     result = await adapter.collect(connection)
     
-    # Check evidence for S6.consentGating
-    consent_evidence = next((e for e in result.evidence if e.obligation_id == "S6.consentGating"), None)
+    # Check evidence for S6.consentGating (Tags)
+    consent_findings = [e for e in result.evidence if e.obligation_id == "S6.consentGating"]
     
-    assert consent_evidence is not None
-    assert consent_evidence.verdict == Verdict.NOT_OBSERVED
-    assert consent_evidence.confidence == Confidence.HIGH
-    assert "15 of 20 tags have no consent settings configured" in consent_evidence.detail
+    # Exactly 20 tags
+    assert len(consent_findings) == 20
+    
+    configured_findings = [f for f in consent_findings if f.verdict == Verdict.OBSERVED]
+    unconfigured_findings = [f for f in consent_findings if f.verdict == Verdict.NOT_OBSERVED]
+    
+    assert len(configured_findings) == 5
+    assert len(unconfigured_findings) == 15
+    
+    # Verify the GTM finding structure is respected
+    sample_finding = consent_findings[0]
+    assert sample_finding.structured_detail.resource_type == "tag"
+    assert "container" in sample_finding.structured_detail.metadata
+    assert "tag" in sample_finding.structured_detail.metadata
+    assert "trigger" in sample_finding.structured_detail.metadata
+    assert "configuration" in sample_finding.structured_detail.metadata
+    assert sample_finding.structured_detail.operation == "get_live_version"
+    
+    # Check evidence for version history
+    version_findings = [e for e in result.evidence if e.structured_detail and e.structured_detail.resource_type == "version"]
+    assert len(version_findings) == 2
+    
+    v2_finding = next(v for v in version_findings if v.structured_detail.resource_id == "v2")
+    assert v2_finding.structured_detail.metadata["change_metadata"]["numTags"] == 20
     
     # Check evidence for S12.governance.tagInventory
-    inventory_evidence = next((e for e in result.evidence if e.obligation_id == "S12.governance.tagInventory"), None)
+    inventory_evidence = next((e for e in result.evidence if e.source == "gtm:tag_inventory"), None)
     
     assert inventory_evidence is not None
     assert inventory_evidence.verdict == Verdict.OBSERVED

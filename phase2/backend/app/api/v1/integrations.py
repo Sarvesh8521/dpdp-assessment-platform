@@ -35,7 +35,7 @@ from sqlalchemy import select, and_
 
 from app.auth.dependencies import AuthContext, get_current_user
 from app.core.config import get_settings
-from app.db.session import get_db_session
+from app.db.session import get_db_session, async_session_factory
 from app.db.models.connection import Connection, ConnectionStatus
 from app.db.models.client import Client
 from app.db.models.audit_log import AuditLog
@@ -140,14 +140,16 @@ def make_audit_callback(session: AsyncSession, client_id: uuid.UUID | None = Non
         # fallback to the factory's client_id if not explicitly provided
         cb_client_id = kwargs.pop("client_id", client_id) or client_id
         
-        await _audit_log(
-            session=session,
-            client_id=cb_client_id,
-            log_status=log_status,
-            assessment_id=assessment_id,
-            duration_ms=duration_ms,
-            **kwargs
-        )
+        async with async_session_factory() as audit_session:
+            await _audit_log(
+                session=audit_session,
+                client_id=cb_client_id,
+                log_status=log_status,
+                assessment_id=assessment_id,
+                duration_ms=duration_ms,
+                **kwargs
+            )
+            await audit_session.commit()
     return callback
 
 
@@ -192,15 +194,6 @@ async def google_oauth_init(
     )
     logger.info("google_oauth_start", provider=provider, integration=provider, state_id=state, redirect_uri=settings.google_oauth_redirect_uri)
 
-    await _audit_log(
-        session,
-        client_id=client_id,
-        actor=str(auth.user_id),
-        integration=provider,
-        operation="oauth_init",
-        endpoint="accounts.google.com/oauth",
-        log_status="initiated",
-    )
     await session.commit()
 
     return OAuthInitResponse(auth_url=auth_url, state=state, provider=provider)
@@ -325,15 +318,6 @@ async def google_oauth_callback(
             )
             session.add(connection)
 
-        await _audit_log(
-            session,
-            client_id=client_id,
-            actor=str(user_id),
-            integration=provider,
-            operation="oauth_callback",
-            endpoint="oauth2.googleapis.com/token",
-            log_status="success",
-        )
         await session.commit()
 
         await session.commit()
@@ -396,15 +380,6 @@ async def meta_oauth_init(
         settings.meta_oauth_redirect_uri, state
     )
 
-    await _audit_log(
-        session,
-        client_id=client_id,
-        actor=str(auth.user_id),
-        integration="meta",
-        operation="oauth_init",
-        endpoint="facebook.com/oauth",
-        log_status="initiated",
-    )
     await session.commit()
 
     return OAuthInitResponse(auth_url=auth_url, state=state, provider="meta")
@@ -492,11 +467,6 @@ async def meta_oauth_callback(
             )
             session.add(connection)
 
-        await _audit_log(
-            session, client_id=client_id, actor=str(user_id),
-            integration="meta", operation="oauth_callback", endpoint="graph.facebook.com/oauth",
-            log_status="success"
-        )
         await session.commit()
 
         params = urlencode({
@@ -542,15 +512,6 @@ async def github_oauth_init(
     )
     auth_url = handler.get_install_url(state)
 
-    await _audit_log(
-        session,
-        client_id=client_id,
-        actor=str(auth.user_id),
-        integration="github",
-        operation="github_app_init",
-        endpoint="github.com/apps/install",
-        log_status="initiated",
-    )
     await session.commit()
 
     return OAuthInitResponse(auth_url=auth_url, state=state, provider="github")
@@ -688,12 +649,6 @@ async def github_oauth_callback(
             )
             session.add(connection)
 
-        await _audit_log(
-            session, client_id=client_id, actor=str(user_id),
-            integration="github", operation="github_app_callback",
-            endpoint="github.com/apps/callback",
-            log_status="success",
-        )
         await session.commit()
 
         logger.info(
@@ -814,15 +769,6 @@ async def list_resources(
         else:
             raise HTTPException(status_code=400, detail=f"Resource listing not supported for '{provider}'")
 
-        await _audit_log(
-            session,
-            client_id=client_id,
-            actor=str(auth.user_id),
-            integration=provider,
-            operation="list_resources",
-            endpoint=f"{provider}/resources",
-            log_status="success",
-        )
         await session.commit()
 
         return ResourceListResponse(
@@ -838,16 +784,6 @@ async def list_resources(
         )
 
     except ResourceFetchError as e:
-        await _audit_log(
-            session,
-            client_id=client_id,
-            actor=str(auth.user_id),
-            integration=provider,
-            operation="list_resources",
-            endpoint=f"{provider}/resources",
-            log_status="error",
-            error_detail=str(e),
-        )
         await session.commit()
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -903,15 +839,6 @@ async def list_business_assets(
             access_token, business_id, audit_callback=make_audit_callback(session, client_id)
         )
 
-        await _audit_log(
-            session,
-            client_id=client_id,
-            actor=str(auth.user_id),
-            integration="meta",
-            operation="list_business_assets",
-            endpoint=f"meta/resources/{business_id}/assets",
-            log_status="success",
-        )
         await session.commit()
 
         return ResourceListResponse(
@@ -927,16 +854,6 @@ async def list_business_assets(
         )
 
     except ResourceFetchError as e:
-        await _audit_log(
-            session,
-            client_id=client_id,
-            actor=str(auth.user_id),
-            integration="meta",
-            operation="list_business_assets",
-            endpoint=f"meta/resources/{business_id}/assets",
-            log_status="error",
-            error_detail=str(e),
-        )
         await session.commit()
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -993,15 +910,6 @@ async def select_resource(
     connection.resource_id = resource_id
     connection.resource_name = resource_name
 
-    await _audit_log(
-        session,
-        client_id=client_id,
-        actor=str(auth.user_id),
-        integration=provider,
-        operation="select_resource",
-        endpoint=f"integrations/{provider}/select-resource",
-        log_status="success",
-    )
     await session.commit()
 
     return {
@@ -1098,16 +1006,6 @@ async def finalize_connection(
             secret_ref="",
         )
         session.add(connection)
-        await _audit_log(
-            session,
-            client_id=client_id,
-            actor=str(auth.user_id),
-            integration=data.provider,
-            operation="connect",
-            endpoint=f"integrations/{data.provider}/connect",
-            log_status="error",
-            error_detail=str(e),
-        )
         await session.commit()
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1125,15 +1023,6 @@ async def finalize_connection(
     )
     session.add(connection)
 
-    await _audit_log(
-        session,
-        client_id=client_id,
-        actor=str(auth.user_id),
-        integration=data.provider,
-        operation="connect",
-        endpoint=f"integrations/{data.provider}/connect",
-        log_status="success",
-    )
     await session.commit()
 
     return {
@@ -1153,7 +1042,13 @@ async def disconnect(
     session: AsyncSession = Depends(get_db_session),
 ) -> Any:
     """Disconnect an integration and revoke tokens."""
-    connection = await session.get(Connection, connection_id)
+    result = await session.execute(
+        select(Connection).where(
+            Connection.id == connection_id,
+            Connection.client_id.in_([uuid.UUID(c) for c in auth.get_accessible_client_ids()])
+        )
+    )
+    connection = result.scalar_one_or_none()
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
 
@@ -1171,15 +1066,6 @@ async def disconnect(
             # Log but don't fail — the connection is being disconnected either way
             pass
 
-    await _audit_log(
-        session,
-        client_id=connection.client_id,
-        actor=str(auth.user_id),
-        integration=connection.provider,
-        operation="disconnect",
-        endpoint=f"integrations/{connection.id}/disconnect",
-        log_status="success",
-    )
     await session.commit()
     return {"message": "Disconnected", "provider": connection.provider}
 
@@ -1194,7 +1080,13 @@ async def reconnect(
 
     Returns info needed to re-initiate the OAuth flow.
     """
-    connection = await session.get(Connection, connection_id)
+    result = await session.execute(
+        select(Connection).where(
+            Connection.id == connection_id,
+            Connection.client_id.in_([uuid.UUID(c) for c in auth.get_accessible_client_ids()])
+        )
+    )
+    connection = result.scalar_one_or_none()
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
 
@@ -1202,15 +1094,6 @@ async def reconnect(
 
     connection.status = ConnectionStatus.PENDING
 
-    await _audit_log(
-        session,
-        client_id=connection.client_id,
-        actor=str(auth.user_id),
-        integration=connection.provider,
-        operation="reconnect",
-        endpoint=f"integrations/{connection.id}/reconnect",
-        log_status="initiated",
-    )
     await session.commit()
 
     return {
@@ -1252,18 +1135,25 @@ async def integration_status(
         )):
             provider_map[conn.provider] = conn
 
+    # Providers that don't require post-OAuth resource selection
+    NO_RESOURCE_SELECTION_PROVIDERS = {"cmp"}
+
     # Build status list
     statuses = []
     for provider in ALL_PROVIDERS:
         current_conn = provider_map.get(provider)
+        requires_res = provider not in NO_RESOURCE_SELECTION_PROVIDERS
         if current_conn and current_conn.status == ConnectionStatus.CONNECTED:
             meta = current_conn.provider_metadata or {}
+            has_resource = bool(current_conn.resource_id)
             statuses.append(IntegrationStatusItem(
                 provider=provider,
                 status="connected",
                 connection_id=str(current_conn.id),
                 resource_id=current_conn.resource_id,
                 resource_name=current_conn.resource_name,
+                resource_selected=has_resource,
+                requires_resource_selection=requires_res,
                 account_email=meta.get("account_email"),
                 account_name=meta.get("account_name"),
                 connected_at=current_conn.connected_at,
@@ -1273,6 +1163,7 @@ async def integration_status(
                 provider=provider,
                 status="error",
                 connection_id=str(current_conn.id),
+                requires_resource_selection=requires_res,
                 error="Connection error — try reconnecting",
             ))
         elif current_conn and current_conn.status == ConnectionStatus.PENDING:
@@ -1280,18 +1171,21 @@ async def integration_status(
                 provider=provider,
                 status="connecting",
                 connection_id=str(current_conn.id),
+                requires_resource_selection=requires_res,
             ))
         elif current_conn and current_conn.status == ConnectionStatus.EXPIRED:
             statuses.append(IntegrationStatusItem(
                 provider=provider,
                 status="expired",
                 connection_id=str(current_conn.id),
+                requires_resource_selection=requires_res,
                 error="Credentials expired — reconnect required",
             ))
         else:
             statuses.append(IntegrationStatusItem(
                 provider=provider,
                 status="not_connected",
+                requires_resource_selection=requires_res,
             ))
 
     return IntegrationStatusResponse(integrations=statuses)
@@ -1361,12 +1255,6 @@ async def health_check_integration(
                 if resp:
                     data = resp
                     total = data.get("total_count", 0)
-                    await _audit_log(
-                        session, client_id=client_id, actor=str(auth.user_id),
-                        integration="github", operation="health_check",
-                        endpoint="api.github.com/installation/repositories",
-                        log_status="success",
-                    )
                     await session.commit()
                     return {
                         "provider": "github",

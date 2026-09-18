@@ -19,6 +19,7 @@ from app.integrations.base.adapter import (
     AdapterResult, ConnectionInfo, HealthStatus, IntegrationAdapter,
 )
 from app.integrations.base.http_client import AuditedHTTPClient, ExternalAPIError
+from app.domain.evidence import StructuredEvidence
 
 logger = get_logger(__name__)
 
@@ -74,12 +75,10 @@ class SearchConsoleAdapter(IntegrationAdapter):
         self, connection: ConnectionInfo, *,
         assessment_id: str | None = None, client_id: str | None = None,
         access_token: str = "", audit_callback: Any = None,
-        declared_properties: list[str] | None = None,
     ) -> AdapterResult:
         evidence: list[EvidenceItem] = []
         errors: list[str] = []
         now = datetime.now(timezone.utc)
-        declared = set(declared_properties or [])
 
         # Get the selected property URL (siteUrl) from the connection metadata
         # The frontend stores it as resource_id or ad_account_id depending on how it's passed
@@ -114,27 +113,21 @@ class SearchConsoleAdapter(IntegrationAdapter):
                         "url": url,
                         "permission": permission,
                     })
-                    if declared and url not in declared:
-                        undeclared.append(url)
 
-                if undeclared:
-                    evidence.append(EvidenceItem(
-                        obligation_id="S10.scope.properties",
-                        verdict=Verdict.NOT_OBSERVED, confidence=Confidence.HIGH,
-                        source="search_console:verified_sites", observed_at=now,
-                        detail=(
-                            f"Found {len(undeclared)} verified properties not declared in scope: "
-                            f"{', '.join(undeclared)}"
-                        ),
-                        raw_metadata={"undeclared": undeclared, "total_verified": len(verified_properties)},
-                    ))
-                else:
+                for vp in verified_properties:
                     evidence.append(EvidenceItem(
                         obligation_id="S10.scope.properties",
                         verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
-                        source="search_console:verified_sites", observed_at=now,
-                        detail=f"All {len(verified_properties)} verified properties are declared in scope.",
-                        raw_metadata={"total_verified": len(verified_properties)},
+                        source=f"search_console:verified_site:{vp['url']}", observed_at=now,
+                        detail=f"Verified property in Search Console: {vp['url']} (Permission: {vp['permission']})",
+                        raw_metadata={"property_url": vp["url"], "permission": vp["permission"]},
+                        structured_detail=StructuredEvidence(
+                            source="search_console", integration="search_console", operation="list_sites",
+                            resource_type="property", resource_id=vp["url"], resource_name=vp["url"],
+                            location=f"Property: {vp['url']}",
+                            observed_at=now, observed_state="Verified", expected_state="N/A",
+                            detail=f"Verified property in Search Console: {vp['url']} (Permission: {vp['permission']})",
+                        )
                     ))
             except ExternalAPIError as exc:
                 errors.append(f"Property discovery failed: {exc}")
@@ -160,14 +153,21 @@ class SearchConsoleAdapter(IntegrationAdapter):
                             "isPending": sm.get("isPending", False),
                             "isSitemapsIndex": sm.get("isSitemapsIndex", False),
                         })
-                        
-                    evidence.append(EvidenceItem(
-                        obligation_id="S10.scope.properties",
-                        verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
-                        source="search_console:sitemaps", observed_at=now,
-                        detail=f"Found {len(sitemap_list)} sitemaps for property {site_url}.",
-                        raw_metadata={"sitemaps": sitemap_list, "site_url": site_url}
-                    ))
+                    for sm in sitemap_list:
+                        evidence.append(EvidenceItem(
+                            obligation_id="S10.scope.properties",
+                            verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
+                            source=f"search_console:sitemap:{sm['path']}", observed_at=now,
+                            detail=f"Found sitemap {sm['path']} for property {site_url}.",
+                            structured_detail=StructuredEvidence(
+                                source="search_console", integration="search_console", operation="list_sitemaps",
+                                resource_type="sitemap", resource_id=sm["path"], resource_name=sm["path"],
+                                location=f"Property: {site_url} > Sitemap: {sm['path']}",
+                                observed_at=now, observed_state=sm["type"], expected_state="N/A",
+                                detail=f"Found sitemap {sm['path']} for property {site_url}.",
+                                metadata={"sitemap": sm}
+                            )
+                        ))
                 except ExternalAPIError as exc:
                     errors.append(f"Sitemap collection failed for {site_url}: {exc}")
 
@@ -180,6 +180,15 @@ class SearchConsoleAdapter(IntegrationAdapter):
                     verdict=Verdict.CANNOT_DETERMINE, confidence=Confidence.LOW,
                     source="search_console:error", observed_at=now,
                     detail=f"Search Console collection failed: {exc}",
+                    structured_detail=StructuredEvidence(
+                        source="search_console", integration="search_console", operation="list_sites",
+                        resource_type="property",
+                        location="Unavailable",
+                        observed_at=now, observed_state="Collection error",
+                        expected_state="Successful collection",
+                        detail=f"Search Console collection failed: {exc}",
+                        reason=f"API error: {exc}",
+                    ),
                 )],
                 errors=[str(exc)], partial=True,
             )

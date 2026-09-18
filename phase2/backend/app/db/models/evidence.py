@@ -72,9 +72,11 @@ class Evidence(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
     )
     detail: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Sanitized metadata only — defined per adapter
     sanitized_metadata: Mapped[dict | None] = mapped_column(JSON)
+    structured_detail: Mapped[dict | None] = mapped_column(JSON)
 
     # Relationships
     assessment = relationship("Assessment", back_populates="evidence_items")

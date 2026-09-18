@@ -30,6 +30,61 @@ class Confidence(str, enum.Enum):
     LOW = "low"
 
 
+
+# Metadata keys that must NEVER appear in evidence (PII / secrets)
+_FORBIDDEN_METADATA_KEYS = frozenset({
+    "email", "phone", "secret", "token", "password", "aadhaar",
+    "ssn", "credential", "api_key", "apikey", "private_key",
+})
+
+
+class StructuredEvidence(BaseModel):
+    """Detailed metadata representing the 'what, where, why' of a single evidence finding.
+
+    Required fields (always available from every adapter):
+        source, integration, operation, resource_type, observed_at, detail
+
+    Optional fields (provider-dependent):
+        finding_id — set downstream by FindingService after finding creation
+        resource_id, resource_name, location, observed_state, expected_state,
+        reason, metadata
+    """
+    # ── Always-required fields ──
+    source: str
+    integration: str
+    operation: str = Field(..., description="Provider API call or operation that produced this evidence")
+    resource_type: str = Field(..., description="Type of the resource being assessed")
+    observed_at: datetime = Field(..., description="Timestamp when the observation was made")
+    detail: str = Field(..., description="Human-readable detail, no personal data")
+
+    # ── Traceability ──
+    finding_id: str | None = Field(
+        default=None,
+        description="Set by FindingService after the finding is created, completing the evidence chain",
+    )
+
+    # ── Provider-dependent fields ──
+    resource_id: str | None = None
+    resource_name: str | None = None
+    location: str = Field(default="Unavailable", description="Precise path/location where this was observed")
+    observed_state: str | None = None
+    expected_state: str | None = None
+    reason: str | None = None
+    metadata: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def reject_pii_metadata_keys(self) -> "StructuredEvidence":
+        """Hard rule: metadata must NEVER contain keys that suggest PII or secrets."""
+        if self.metadata:
+            for key in self.metadata:
+                if key.lower() in _FORBIDDEN_METADATA_KEYS:
+                    raise ValueError(
+                        f"Metadata key '{key}' is forbidden — evidence must never store PII or secrets"
+                    )
+        return self
+
+
+
 class EvidenceItem(BaseModel):
     """Evidence collected by an integration adapter.
 
@@ -55,6 +110,10 @@ class EvidenceItem(BaseModel):
     raw_metadata: dict[str, Any] | None = Field(
         default=None,
         description="Configuration metadata only, never PII",
+    )
+    structured_detail: StructuredEvidence | None = Field(
+        default=None,
+        description="Structured contextual metadata for the finding",
     )
 
     @model_validator(mode="after")

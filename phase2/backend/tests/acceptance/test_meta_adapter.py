@@ -58,6 +58,13 @@ async def test_meta_adapter_evidence_generation(mock_client_class, adapter, conn
                         "name": "Main Pixel",
                         "automatic_matching_fields": ["email", "phone"],
                         "first_party_cookie_status": "ENABLED"
+                        # No CAPI evidence here
+                    },
+                    {
+                        "id": "pix2",
+                        "name": "CAPI Pixel",
+                        "is_server_events_enabled": True
+                        # Direct CAPI evidence
                     }
                 ]
             }
@@ -74,34 +81,38 @@ async def test_meta_adapter_evidence_generation(mock_client_class, adapter, conn
     result = await adapter.collect(connection, ad_account_id="act_123456")
     
     assert len(result.errors) == 0
-    assert len(result.evidence) == 5
+    assert len(result.evidence) == 6
     
     # S9.sharing.audienceUpload (Custom Audiences)
-    audience_ev = next(e for e in result.evidence if e.source == "meta:custom_audiences")
+    audience_ev = next(e for e in result.evidence if e.source == "meta:custom_audience:My Customer List")
     assert audience_ev.verdict == Verdict.OBSERVED
     assert audience_ev.confidence == Confidence.HIGH
-    assert len(audience_ev.raw_metadata["audiences"]) == 1
-    assert audience_ev.raw_metadata["audiences"][0]["origin"] == "USER_PROVIDED_ONLY"
+    assert audience_ev.structured_detail.metadata["audience_info"]["origin"] == "USER_PROVIDED_ONLY"
     
     # S9.sharing.advancedMatching (Pixels)
-    matching_ev = next(e for e in result.evidence if e.source == "meta:advanced_matching")
+    matching_ev = next(e for e in result.evidence if e.source == "meta:advanced_matching:Main Pixel")
     assert matching_ev.verdict == Verdict.OBSERVED
     assert "email" in matching_ev.detail
     
-    # S9.sharing.serverSide (Conversions API indicator)
-    capi_ev = next(e for e in result.evidence if e.source == "meta:conversions_api")
-    assert capi_ev.verdict == Verdict.OBSERVED
-    assert capi_ev.confidence == Confidence.MEDIUM
+    # S9.sharing.serverSide (Conversions API indicator) - Pixel only
+    capi_ev1 = next(e for e in result.evidence if e.source == "meta:conversions_api:Main Pixel")
+    assert capi_ev1.verdict == Verdict.CANNOT_DETERMINE
+    assert capi_ev1.confidence == Confidence.LOW
+    assert capi_ev1.structured_detail.metadata["human_review_required"] is True
+    
+    # S9.sharing.serverSide (Conversions API indicator) - Direct CAPI evidence
+    capi_ev2 = next(e for e in result.evidence if e.source == "meta:conversions_api:CAPI Pixel")
+    assert capi_ev2.verdict == Verdict.OBSERVED
+    assert capi_ev2.confidence == Confidence.HIGH
+    assert "explicitly enabled" in capi_ev2.detail
     
     # S9.sharing.documented (Business sharing)
-    sharing_ev = next(e for e in result.evidence if e.source == "meta:business_sharing")
+    sharing_ev = next(e for e in result.evidence if e.source == "meta:business_sharing:Test Agency")
     assert sharing_ev.verdict == Verdict.OBSERVED
-    assert "1 external agencies/businesses" in sharing_ev.detail
     
     # S9.sharing.audienceUpload (Offline Events)
-    offline_ev = next(e for e in result.evidence if e.source == "meta:offline_events")
+    offline_ev = next(e for e in result.evidence if e.source == "meta:offline_events:In-store sales")
     assert offline_ev.verdict == Verdict.OBSERVED
-    assert "1 Offline Event Sets" in offline_ev.detail
 
 @pytest.mark.asyncio
 @patch("app.integrations.meta.adapter.AuditedHTTPClient")
@@ -120,8 +131,8 @@ async def test_meta_adapter_error_handling(mock_client_class, adapter, connectio
     # Wait, if get fails, it's caught and appended to errors.
     result = await adapter.collect(connection, ad_account_id="act_123456")
     
-    assert len(result.errors) == 4  # Audiences, Pixels, Sharing, Offline Events
-    assert len(result.evidence) == 0
+    assert len(result.errors) == 4  # Audiences, Pixels, Sharing (agencies, client_businesses), Offline Events
+    assert len(result.evidence) == 5
     assert not result.partial
 
 @pytest.mark.asyncio

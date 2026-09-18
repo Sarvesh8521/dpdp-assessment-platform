@@ -18,12 +18,13 @@ from app.integrations.base.adapter import (
     AdapterResult, ConnectionInfo, HealthStatus, IntegrationAdapter,
 )
 from app.integrations.base.http_client import AuditedHTTPClient, ExternalAPIError
+from app.domain.evidence import StructuredEvidence
 
 logger = get_logger(__name__)
 
 CMP_FORBIDDEN_ENDPOINTS = [
     # Individual consent records — the sharpest instance of the rule
-    "consent-receipts",
+    "consent-receipts$",
     "consent-records",
     "individual-consent",
     "consent/receipts",
@@ -63,7 +64,15 @@ class BaseCMPAdapter(IntegrationAdapter):
                 verdict=Verdict.NOT_OBSERVED, confidence=Confidence.HIGH,
                 source=f"cmp:{self.id}:geolocation", observed_at=now,
                 detail="Geolocation rules exempt India from consent requirements.",
-                raw_metadata={"regions_configured": len(rules)},
+                structured_detail=StructuredEvidence(
+                    source="cmp", integration=self.provider, operation="list_geolocation_rules",
+                    resource_type="geolocation_rule", resource_id=self.provider,
+                    location=f"CMP: {self.provider} > Geolocation Rule",
+                    observed_at=now, observed_state="India Exempt", expected_state="India Included",
+                    detail="Geolocation rules exempt India from consent requirements.",
+                    reason="India is not listed in any geolocation consent rule.",
+                    metadata={"regions_configured": len(rules)}
+                )
             ))
         elif not india_exempt:
             evidence.append(EvidenceItem(
@@ -71,6 +80,14 @@ class BaseCMPAdapter(IntegrationAdapter):
                 verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
                 source=f"cmp:{self.id}:geolocation", observed_at=now,
                 detail="India is included in geolocation consent rules.",
+                structured_detail=StructuredEvidence(
+                    source="cmp", integration=self.provider, operation="list_geolocation_rules",
+                    resource_type="geolocation_rule", resource_id=self.provider,
+                    location=f"CMP: {self.provider} > Geolocation Rule",
+                    observed_at=now, observed_state="India Included", expected_state="India Included",
+                    detail="India is included in geolocation consent rules.",
+                    reason="The geolocation rules explicitly include India in the consent enforcement regions."
+                )
             ))
         return evidence
 
@@ -146,7 +163,15 @@ class OneTrustAdapter(BaseCMPAdapter):
                     confidence=Confidence.HIGH,
                     source="cmp:onetrust:purposes", observed_at=now,
                     detail=f"Found {len(purpose_list)} consent purposes configured.",
-                    raw_metadata={"purpose_count": len(purpose_list)},
+                    structured_detail=StructuredEvidence(
+                        source="cmp", integration="onetrust", operation="list_purposes",
+                        resource_type="purpose", resource_id="onetrust",
+                        location="CMP: onetrust > Purpose",
+                        observed_at=now, observed_state=f"{len(purpose_list)} purposes configured", expected_state=">0 purposes configured",
+                        detail=f"Found {len(purpose_list)} consent purposes configured.",
+                        reason=f"The CMP is configured with {len(purpose_list)} active consent purposes.",
+                        metadata={"purpose_count": len(purpose_list)}
+                    )
                 ))
             except ExternalAPIError as exc:
                 errors.append(f"Purposes query failed: {exc}")
@@ -161,6 +186,14 @@ class OneTrustAdapter(BaseCMPAdapter):
                     confidence=Confidence.MEDIUM,
                     source="cmp:onetrust:categories", observed_at=now,
                     detail=f"Found {len(categories)} cookie categories.",
+                    structured_detail=StructuredEvidence(
+                        source="cmp", integration="onetrust", operation="list_cookie_categories",
+                        resource_type="cookie_category", resource_id="onetrust",
+                        location="CMP: onetrust > Cookie Category",
+                        observed_at=now, observed_state=f"{len(categories)} categories configured", expected_state=">0 categories configured",
+                        detail=f"Found {len(categories)} cookie categories.",
+                        reason=f"The CMP categorises cookies into {len(categories)} distinct groups."
+                    )
                 ))
             except ExternalAPIError:
                 pass
@@ -184,6 +217,14 @@ class OneTrustAdapter(BaseCMPAdapter):
                         verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
                         source="cmp:onetrust:banners", observed_at=now,
                         detail=f"Successfully verified {len(banner_list)} banner configurations.",
+                        structured_detail=StructuredEvidence(
+                            source="cmp", integration="onetrust", operation="list_banners",
+                            resource_type="banner_configuration", resource_id="onetrust",
+                            location="CMP: onetrust > Banner Configuration",
+                            observed_at=now, observed_state=f"{len(banner_list)} banners configured", expected_state=">0 banners configured",
+                            detail=f"Successfully verified {len(banner_list)} banner configurations.",
+                            reason=f"The CMP is configured with {len(banner_list)} active banner configurations."
+                        )
                     ))
             except ExternalAPIError:
                 pass
@@ -198,6 +239,14 @@ class OneTrustAdapter(BaseCMPAdapter):
                         verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
                         source="cmp:onetrust:schema", observed_at=now,
                         detail=f"Verified consent-record schema contains {len(fields)} configured fields. No individual records accessed.",
+                        structured_detail=StructuredEvidence(
+                            source="cmp", integration="onetrust", operation="get_schema",
+                            resource_type="consent_record_schema", resource_id="onetrust",
+                            location="CMP: onetrust > Consent Record Schema",
+                            observed_at=now, observed_state=f"{len(fields)} schema fields", expected_state="Schema configured",
+                            detail=f"Verified consent-record schema contains {len(fields)} configured fields. No individual records accessed.",
+                            reason=f"The consent record schema defines {len(fields)} fields indicating what metadata is captured upon user consent."
+                        )
                     ))
             except ExternalAPIError:
                 pass
@@ -212,6 +261,14 @@ class OneTrustAdapter(BaseCMPAdapter):
                         verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
                         source="cmp:onetrust:integrations", observed_at=now,
                         detail=f"Discovered {len(integration_list)} active integration targets for consent signal forwarding.",
+                        structured_detail=StructuredEvidence(
+                            source="cmp", integration="onetrust", operation="list_integrations",
+                            resource_type="integration_list", resource_id="onetrust",
+                            location="CMP: onetrust > Integration List",
+                            observed_at=now, observed_state=f"{len(integration_list)} integrations", expected_state="Forwarding configured",
+                            detail=f"Discovered {len(integration_list)} active integration targets for consent signal forwarding.",
+                            reason=f"The CMP is configured with {len(integration_list)} active integrations for forwarding consent signals."
+                        )
                     ))
             except ExternalAPIError:
                 pass
@@ -243,7 +300,7 @@ class CookieYesAdapter(BaseCMPAdapter):
     async def health_check(self, connection: ConnectionInfo) -> HealthStatus:
         return HealthStatus(
             healthy=False, provider=self.provider,
-            message="Integration awaiting API access configuration", checked_at=datetime.now(timezone.utc),
+            message="Provider API is unsupported for automated metadata extraction.", checked_at=datetime.now(timezone.utc),
         )
 
     async def collect(
@@ -258,7 +315,15 @@ class CookieYesAdapter(BaseCMPAdapter):
             obligation_id="CMP.purposes.configured",
             verdict=Verdict.CANNOT_DETERMINE, confidence=Confidence.LOW,
             source="cmp:cookieyes", observed_at=now,
-            detail="CookieYes integration — awaiting API access configuration.",
+            detail="Cannot determine. CookieYes API is not currently supported for automated metadata collection without risking PII access or fabricating data.",
+            structured_detail=StructuredEvidence(
+                source="cmp", integration="cookieyes", operation="none",
+                resource_type="none", resource_id="cookieyes",
+                location="Unavailable",
+                observed_at=now, observed_state="Unsupported API", expected_state="Configured",
+                detail="Cannot determine. CookieYes API is not currently supported for automated metadata collection without risking PII access or fabricating data.",
+                reason="CookieYes does not expose a public API suitable for safe automated metadata extraction.",
+            )
         ))
         return AdapterResult(evidence=evidence)
 
@@ -285,7 +350,7 @@ class SecuritiAdapter(BaseCMPAdapter):
     async def health_check(self, connection: ConnectionInfo) -> HealthStatus:
         return HealthStatus(
             healthy=False, provider=self.provider,
-            message="Integration awaiting API access configuration", checked_at=datetime.now(timezone.utc),
+            message="Provider API is unsupported for automated metadata extraction.", checked_at=datetime.now(timezone.utc),
         )
 
     async def collect(
@@ -299,7 +364,15 @@ class SecuritiAdapter(BaseCMPAdapter):
             obligation_id="CMP.purposes.configured",
             verdict=Verdict.CANNOT_DETERMINE, confidence=Confidence.LOW,
             source="cmp:securiti", observed_at=now,
-            detail="Securiti integration — awaiting API access configuration.",
+            detail="Cannot determine. Securiti API is not currently supported for automated metadata collection without risking PII access or fabricating data.",
+            structured_detail=StructuredEvidence(
+                source="cmp", integration="securiti", operation="none",
+                resource_type="none", resource_id="securiti",
+                location="Unavailable",
+                observed_at=now, observed_state="Unsupported API", expected_state="Configured",
+                detail="Cannot determine. Securiti API is not currently supported for automated metadata collection without risking PII access or fabricating data.",
+                reason="Securiti does not expose a public API suitable for safe automated metadata extraction.",
+            )
         ))
         return AdapterResult(evidence=evidence)
 

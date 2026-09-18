@@ -13,6 +13,7 @@ from alembic import context
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import all models here so Alembic can see them
+from app.db.models import *
 from app.db.base import Base
 from app.core.config import get_settings
 

@@ -44,6 +44,7 @@ from app.security.pii_sanitizer import (
     AdapterSanitizer,
     sanitize_html_tag_body,
 )
+from app.domain.evidence import StructuredEvidence
 
 logger = get_logger(__name__)
 
@@ -217,6 +218,17 @@ class GTMAdapter(IntegrationAdapter):
                     source="gtm:list_accounts",
                     observed_at=now,
                     detail="No GTM accounts found. Cannot assess tag management.",
+                    structured_detail=StructuredEvidence(
+                        source="gtm",
+                        integration="gtm",
+                        operation="list_accounts",
+                        resource_type="account",
+                        observed_at=now,
+                        detail="No GTM accounts found. Cannot assess tag management.",
+                        observed_state="0 accounts",
+                        expected_state=">=1 GTM account",
+                        reason="No GTM accounts accessible with the provided credentials.",
+                    ),
                 ))
                 return AdapterResult(evidence=evidence, errors=errors, warnings=warnings)
 
@@ -254,7 +266,7 @@ class GTMAdapter(IntegrationAdapter):
 
                             # Analyze each tag
                             for tag in tags:
-                                tag_analysis = self._analyze_tag(tag, triggers)
+                                tag_analysis = self._analyze_tag(tag, triggers, container_name, container_public_id)
                                 all_tags_analyzed.append(tag_analysis)
 
                                 if tag_analysis["has_consent_settings"]:
@@ -278,7 +290,42 @@ class GTMAdapter(IntegrationAdapter):
                                 version_headers = versions_response.get("containerVersionHeader", [])
                                 # Note consent-related changes
                                 for vh in version_headers[-5:]:  # Last 5 versions
-                                    pass  # Version metadata is safe to store
+                                    v_id = vh.get("containerVersionId", "")
+                                    v_name = vh.get("name", "Unnamed version")
+                                    
+                                    evidence.append(EvidenceItem(
+                                        obligation_id="S12.governance.tagInventory",
+                                        verdict=Verdict.OBSERVED,
+                                        confidence=Confidence.HIGH,
+                                        source=f"gtm:version:{v_id}",
+                                        observed_at=now,
+                                        detail=f"Version '{v_name}' (ID: {v_id}) in container '{container_name}'.",
+                                        structured_detail=StructuredEvidence(
+                                            source="gtm",
+                                            integration="gtm",
+                                            operation="list_version_headers",
+                                            resource_type="version",
+                                            resource_id=v_id,
+                                            resource_name=v_name,
+                                            location=f"Container: {container_public_id} ({container_name}) > Version: {v_id} ({v_name})",
+                                            observed_at=now,
+                                            observed_state="Version published",
+                                            expected_state="Version tracked",
+                                            detail=f"Version '{v_name}' (ID: {v_id}) in container '{container_name}'.",
+                                            metadata={
+                                                "container": container_name,
+                                                "version": v_id,
+                                                "timestamp": vh.get("fingerprint", "Cannot determine"),
+                                                "change_metadata": {
+                                                    "numTags": vh.get("numTags"),
+                                                    "numTriggers": vh.get("numTriggers"),
+                                                    "numVariables": vh.get("numVariables"),
+                                                    "deleted": vh.get("deleted")
+                                                },
+                                                "configuration": "Version Header"
+                                            }
+                                        )
+                                    ))
 
                             except ExternalAPIError as ver_err:
                                 warnings.append(f"Could not retrieve version history: {ver_err}")
@@ -295,43 +342,94 @@ class GTMAdapter(IntegrationAdapter):
                                 source=f"gtm:container:{container_public_id}",
                                 observed_at=now,
                                 detail=f"Could not access live version for container {container_name}",
+                                structured_detail=StructuredEvidence(
+                                    source="gtm",
+                                    integration="gtm",
+                                    operation="get_live_version",
+                                    resource_type="container",
+                                    resource_id=container_public_id,
+                                    resource_name=container_name,
+                                    location=f"Container: {container_public_id} ({container_name})",
+                                    observed_at=now,
+                                    detail=f"Could not access live version for container {container_name}",
+                                    observed_state="Inaccessible",
+                                    expected_state="Live version accessible",
+                                    reason=f"API error retrieving live version: {ver_err}",
+                                ),
                             ))
 
                 except ExternalAPIError as acc_err:
                     errors.append(f"Cannot determine: failed to list containers for account {account_id}: {acc_err}")
 
-            # Generate evidence from analysis
-            total_tags = tags_with_consent + tags_without_consent
+            # Analyze each tag for evidence
+            for t in all_tags_analyzed:
+                # ── S6.consentGating evidence ──
+                consent_detail = "Consent settings configured." if t["has_consent_settings"] else "No consent settings configured."
+                expected_state = "consentSettings configured with valid consentStatus"
+                observed_state = "consentSettings present" if t["has_consent_settings"] else "consentSettings missing or notSet"
 
-            # ── S6.consentGating evidence ──
-            if total_tags > 0:
-                if tags_without_consent == 0:
+                evidence.append(EvidenceItem(
+                    obligation_id="S6.consentGating",
+                    verdict=Verdict.OBSERVED if t["has_consent_settings"] else Verdict.NOT_OBSERVED,
+                    confidence=Confidence.HIGH,
+                    source=f"gtm:tag:{t['id']}",
+                    observed_at=now,
+                    detail=f"Tag '{t['name']}' ({t['type']}): {consent_detail}",
+                    structured_detail=StructuredEvidence(
+                        source="gtm",
+                        integration="gtm",
+                        operation="get_live_version",
+                        resource_type="tag",
+                        resource_id=t["id"],
+                        resource_name=t["name"],
+                        location=f"Container: {t['container_public_id']} ({t['container_name']}) > Tag: {t['id']} ({t['name']})",
+                        observed_at=now,
+                        observed_state=observed_state,
+                        expected_state=expected_state,
+                        detail=consent_detail,
+                        reason="Missing consent settings exposes untracked data collection." if not t["has_consent_settings"] else None,
+                        metadata={
+                            "container": t["container_name"],
+                            "tag": t["name"],
+                            "trigger": t["firing_triggers"],
+                            "vendor": t.get("vendor"),
+                            "configuration": t.get("consent_settings")
+                        }
+                    )
+                ))
+
+                # ── S9.sharing.enhancedConversions evidence ──
+                if t["sends_user_data"]:
                     evidence.append(EvidenceItem(
-                        obligation_id="S6.consentGating",
+                        obligation_id="S9.sharing.enhancedConversions",
                         verdict=Verdict.OBSERVED,
                         confidence=Confidence.HIGH,
-                        source="gtm:tag_analysis",
+                        source=f"gtm:tag:{t['id']}",
                         observed_at=now,
-                        detail=f"All {total_tags} tags have consent settings configured.",
-                        raw_metadata=self._sanitize_tag_summary(all_tags_analyzed),
+                        detail=f"Tag '{t['name']}' is configured to transmit user-provided data.",
+                        structured_detail=StructuredEvidence(
+                            source="gtm",
+                            integration="gtm",
+                            operation="get_live_version",
+                            resource_type="tag",
+                            resource_id=t["id"],
+                            resource_name=t["name"],
+                            location=f"Container: {t['container_public_id']} ({t['container_name']}) > Tag: {t['id']} ({t['name']})",
+                            observed_at=now,
+                            observed_state="User-provided data transmission detected",
+                            expected_state="N/A",
+                            detail=f"Tag type '{t['type']}' explicitly handles user data.",
+                            metadata={
+                                "container": t["container_name"],
+                                "tag": t["name"],
+                                "trigger": t["firing_triggers"],
+                                "vendor": t.get("vendor"),
+                                "configuration": "Transmits user data"
+                            }
+                        )
                     ))
-                else:
-                    unconfigured = [
-                        t for t in all_tags_analyzed if not t["has_consent_settings"]
-                    ]
-                    evidence.append(EvidenceItem(
-                        obligation_id="S6.consentGating",
-                        verdict=Verdict.NOT_OBSERVED,
-                        confidence=Confidence.HIGH,
-                        source="gtm:tag_analysis",
-                        observed_at=now,
-                        detail=(
-                            f"{tags_without_consent} of {total_tags} tags have no consent "
-                            f"settings configured. Tags: "
-                            f"{', '.join(t['name'] for t in unconfigured[:10])}"
-                        ),
-                        raw_metadata=self._sanitize_tag_summary(all_tags_analyzed),
-                    ))
+
+            total_tags = len(all_tags_analyzed)
 
             # ── S12.governance.tagInventory evidence ──
             evidence.append(EvidenceItem(
@@ -347,31 +445,27 @@ class GTMAdapter(IntegrationAdapter):
                     "without_consent": tags_without_consent,
                     "sending_user_data": tags_sending_user_data,
                 },
-            ))
-
-            # ── S9.sharing.enhancedConversions evidence ──
-            if tags_sending_user_data > 0:
-                user_data_tags = [
-                    t for t in all_tags_analyzed if t["sends_user_data"]
-                ]
-                evidence.append(EvidenceItem(
-                    obligation_id="S9.sharing.enhancedConversions",
-                    verdict=Verdict.OBSERVED,
-                    confidence=Confidence.HIGH,
-                    source="gtm:enhanced_conversions_analysis",
+                structured_detail=StructuredEvidence(
+                    source="gtm",
+                    integration="gtm",
+                    operation="list_containers",
+                    resource_type="account",
+                    resource_id=accounts[0].get("accountId", "") if accounts else None,
+                    resource_name="Tag Inventory",
+                    location=f"Account: {accounts[0].get('accountId', '')}" if accounts else "Unavailable",
                     observed_at=now,
-                    detail=(
-                        f"{tags_sending_user_data} tags configured to send user-provided data "
-                        f"(Enhanced Conversions / Customer Match). Tags: "
-                        f"{', '.join(t['name'] for t in user_data_tags[:10])}"
-                    ),
-                    raw_metadata={
-                        "tags": [
-                            {"name": t["name"], "type": t["type"], "vendor": t.get("vendor", "")}
-                            for t in user_data_tags
-                        ],
+                    observed_state=f"{total_tags} tags discovered",
+                    expected_state=">=1 tag inventoried",
+                    detail=f"Total tags: {total_tags}, with consent: {tags_with_consent}, without consent: {tags_without_consent}",
+                    reason="No tags discovered across all containers." if total_tags == 0 else None,
+                    metadata={
+                        "total_tags": total_tags,
+                        "with_consent": tags_with_consent,
+                        "without_consent": tags_without_consent,
+                        "sending_user_data": tags_sending_user_data,
                     },
-                ))
+                ),
+            ))
 
             return AdapterResult(
                 evidence=evidence,
@@ -394,6 +488,18 @@ class GTMAdapter(IntegrationAdapter):
                 source="gtm:error",
                 observed_at=now,
                 detail=f"GTM collection failed: {exc}",
+                structured_detail=StructuredEvidence(
+                    source="gtm",
+                    integration="gtm",
+                    operation="list_accounts",
+                    resource_type="account",
+                    location="Unavailable",
+                    observed_at=now,
+                    detail=f"GTM collection failed: {exc}",
+                    observed_state="Collection error",
+                    expected_state="Successful collection",
+                    reason=f"API error: {exc}",
+                ),
             ))
             return AdapterResult(
                 evidence=evidence,
@@ -404,9 +510,10 @@ class GTMAdapter(IntegrationAdapter):
             await client.close()
 
     def _analyze_tag(
-        self, tag: dict[str, Any], triggers: list[dict[str, Any]]
+        self, tag: dict[str, Any], triggers: list[dict[str, Any]], container_name: str, container_public_id: str
     ) -> dict[str, Any]:
         """Analyze a single GTM tag for consent settings and data transmission."""
+        tag_id = tag.get("tagId", "Unknown")
         tag_name = tag.get("name", "Unknown")
         tag_type = tag.get("type", "unknown")
         consent_settings = tag.get("consentSettings", {})
@@ -453,8 +560,11 @@ class GTMAdapter(IntegrationAdapter):
                     custom_html_classification = sanitized["classification"]
 
         return {
+            "id": tag_id,
             "name": tag_name,
             "type": tag_type,
+            "container_name": container_name,
+            "container_public_id": container_public_id,
             "vendor": vendor,
             "has_consent_settings": has_consent,
             "consent_settings": {
@@ -518,6 +628,7 @@ class GTMAdapter(IntegrationAdapter):
                     "type": t["type"],
                     "vendor": t.get("vendor", ""),
                     "has_consent_settings": t["has_consent_settings"],
+                    "consent_settings": t.get("consent_settings"),
                     "sends_user_data": t["sends_user_data"],
                     "firing_triggers": t["firing_triggers"],
                     "paused": t.get("paused", False),

@@ -17,6 +17,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.utils.pii import sanitize_payload
 
 logger = get_logger(__name__)
 
@@ -29,6 +30,7 @@ ALLOWED_HOSTS = frozenset({
     "googleads.googleapis.com",
     "graph.facebook.com",
     "api.github.com",
+    "github.com",
     "api.onetrust.com",
     "app.cookieyes.com",
     "app.securiti.ai",
@@ -153,19 +155,25 @@ class AuditedHTTPClient:
 
     def _check_forbidden(self, endpoint: str) -> None:
         """Check if an endpoint is in the forbidden list."""
+        endpoint_no_query = endpoint.split("?")[0]
         for forbidden in self._forbidden_endpoints:
-            if forbidden in endpoint:
-                raise ForbiddenEndpointError(endpoint, provider=self._provider)
+            if forbidden.endswith("$"):
+                if endpoint_no_query.endswith(forbidden[:-1]):
+                    raise ForbiddenEndpointError(endpoint, provider=self._provider)
+            else:
+                if forbidden in endpoint:
+                    raise ForbiddenEndpointError(endpoint, provider=self._provider)
 
     async def get(
         self,
         endpoint: str,
         *,
         params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
         operation: str = "",
     ) -> dict[str, Any]:
         """Make a GET request with audit logging."""
-        return await self._request("GET", endpoint, params=params, operation=operation)
+        return await self._request("GET", endpoint, params=params, headers=headers, operation=operation)
 
     async def post(
         self,
@@ -174,10 +182,11 @@ class AuditedHTTPClient:
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
         operation: str = "",
     ) -> dict[str, Any]:
         """Make a POST request with audit logging."""
-        return await self._request("POST", endpoint, params=params, json_body=json_body, data=data, operation=operation)
+        return await self._request("POST", endpoint, params=params, json_body=json_body, data=data, headers=headers, operation=operation)
 
     async def _request(
         self,
@@ -187,6 +196,7 @@ class AuditedHTTPClient:
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
         operation: str = "",
     ) -> dict[str, Any]:
         """Execute an HTTP request with full safety controls."""
@@ -197,7 +207,7 @@ class AuditedHTTPClient:
         # HARD RULE: Never perform write operations
         if method.upper() in ("POST", "PUT", "PATCH", "DELETE"):
             # Only allow POST for OAuth token exchange, not for data modification
-            if "oauth" not in endpoint.lower() and "token" not in endpoint.lower():
+            if "oauth" not in endpoint.lower() and "token" not in endpoint.lower() and "searchstream" not in endpoint.lower() and "googleads" not in endpoint.lower():
                 raise ExternalAPIError(
                     f"Write operation {method} is forbidden",
                     provider=self._provider,
@@ -210,7 +220,7 @@ class AuditedHTTPClient:
 
         try:
             response = await self._execute_with_retry(
-                method, endpoint, params=params, json_body=json_body, data=data
+                method, endpoint, params=params, json_body=json_body, data=data, headers=headers
             )
             status_code = response.status_code
 
@@ -234,7 +244,8 @@ class AuditedHTTPClient:
                 )
 
             response.raise_for_status()
-            return response.json()
+            raw_data = response.json()
+            return sanitize_payload(raw_data)
 
         except (RateLimitError, AuthenticationError, ForbiddenError, NotFoundError):
             status = "error"
@@ -287,6 +298,93 @@ class AuditedHTTPClient:
                 except Exception as audit_exc:
                     logger.error("audit_callback_failed", error=str(audit_exc))
 
+    async def download_file(
+        self,
+        endpoint: str,
+        target_path: str,
+        max_bytes: int = 100 * 1024 * 1024, # 100MB limit by default
+        operation: str = "",
+    ) -> None:
+        """Download a file with safety limits and audit logging."""
+        self._validate_url(endpoint)
+        self._check_forbidden(endpoint)
+        
+        start_time = time.monotonic()
+        status_code = None
+        error_detail = None
+        status = "success"
+        
+        try:
+            async with self._client.stream("GET", endpoint, follow_redirects=True) as response:
+                status_code = response.status_code
+                
+                if response.status_code == 429:
+                    raise RateLimitError(provider=self._provider)
+                if response.status_code == 401:
+                    raise AuthenticationError(provider=self._provider)
+                if response.status_code == 403:
+                    raise ForbiddenError(provider=self._provider)
+                if response.status_code == 404:
+                    raise NotFoundError(provider=self._provider)
+                if response.status_code >= 500:
+                    raise ExternalAPIError(f"Server error: {response.status_code}", status_code=response.status_code, provider=self._provider)
+                    
+                response.raise_for_status()
+                
+                bytes_downloaded = 0
+                import aiofiles
+                async with aiofiles.open(target_path, "wb") as f:
+                    async for chunk in response.aiter_bytes():
+                        bytes_downloaded += len(chunk)
+                        if bytes_downloaded > max_bytes:
+                            raise ExternalAPIError("File size exceeded safe limits", provider=self._provider)
+                        await f.write(chunk)
+                        
+        except (RateLimitError, AuthenticationError, ForbiddenError, NotFoundError):
+            status = "error"
+            raise
+        except ExternalAPIError:
+            status = "error"
+            raise
+        except httpx.TimeoutException as exc:
+            status = "timeout"
+            error_detail = str(exc)
+            raise ExternalAPIError("Request timed out", provider=self._provider) from exc
+        except httpx.HTTPError as exc:
+            status = "error"
+            error_detail = str(exc)
+            raise ExternalAPIError(f"HTTP error: {exc}", provider=self._provider) from exc
+        finally:
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+
+            call_record = {
+                "method": "GET_STREAM",
+                "endpoint": endpoint,
+                "status": status,
+                "status_code": status_code,
+                "duration_ms": duration_ms,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            self._call_log.append(call_record)
+
+            if self._audit_callback:
+                try:
+                    await self._audit_callback(
+                        client_id=self._client_id,
+                        assessment_id=self._assessment_id,
+                        actor=f"adapter:{self._provider}",
+                        integration=self._provider,
+                        operation=operation or f"DOWNLOAD {endpoint}",
+                        endpoint=endpoint,
+                        status=status,
+                        status_code=status_code,
+                        duration_ms=duration_ms,
+                        obligations_served=self._obligations_served,
+                        error_detail=error_detail,
+                    )
+                except Exception as audit_exc:
+                    logger.error("audit_callback_failed", error=str(audit_exc))
+
     async def _execute_with_retry(
         self,
         method: str,
@@ -295,6 +393,7 @@ class AuditedHTTPClient:
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         """Execute request with retry logic."""
         settings = get_settings()
@@ -308,6 +407,7 @@ class AuditedHTTPClient:
                     params=params,
                     json=json_body,
                     data=data,
+                    headers=headers,
                 )
 
                 # Don't retry on client errors (except 429)

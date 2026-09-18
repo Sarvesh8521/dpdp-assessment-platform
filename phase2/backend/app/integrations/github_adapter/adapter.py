@@ -9,7 +9,10 @@ Evidence store gets findings + file references, never source code.
 
 from __future__ import annotations
 
+import os
 import re
+import tarfile
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,6 +24,7 @@ from app.integrations.base.adapter import (
     AdapterResult, ConnectionInfo, HealthStatus, IntegrationAdapter,
 )
 from app.integrations.base.http_client import AuditedHTTPClient, ExternalAPIError
+from app.domain.evidence import StructuredEvidence
 
 logger = get_logger(__name__)
 
@@ -251,6 +255,15 @@ class GitHubAdapter(IntegrationAdapter):
                     )
                 except ExternalAPIError as exc:
                     errors.append(f"Failed to analyze {repo}: {exc}")
+                    for obl in self.obligations_answered:
+                        evidence.append(EvidenceItem(
+                            obligation_id=obl,
+                            verdict=Verdict.CANNOT_DETERMINE,
+                            confidence=Confidence.LOW,
+                            source=f"github:{repo}:error",
+                            observed_at=now,
+                            detail=f"Failed to access repository {repo}: {exc}"
+                        ))
 
             return AdapterResult(evidence=evidence, errors=errors, warnings=warnings)
         finally:
@@ -266,241 +279,317 @@ class GitHubAdapter(IntegrationAdapter):
         now: datetime,
     ) -> None:
         """Analyze a single repository — static analysis, no persistent storage."""
-        # Check dependency files for SDK inventory
-        sdk_files = [
-            ("package.json", "npm"),
-            ("Podfile", "cocoapods"),
-            ("build.gradle", "gradle"),
-            ("app/build.gradle", "gradle"),
-            ("pubspec.yaml", "flutter"),
-        ]
-
-        found_sdks: list[dict[str, str]] = []
-
-        for filepath, pkg_manager in sdk_files:
-            if Path(filepath).name in FORBIDDEN_FILES:
-                warnings.append(f"Blocked attempt to read forbidden file: {filepath}")
-                continue
-            try:
-                content_resp = await client.get(
-                    f"/repos/{repo}/contents/{filepath}",
-                    operation=f"get_{filepath.replace('/', '_')}",
-                )
-                # Content comes base64 encoded
-                import base64
-                content = base64.b64decode(content_resp.get("content", "")).decode("utf-8", errors="replace")
-
-                # Check for tracker SDKs — DO NOT store the content
-                for sdk_name, patterns in TRACKER_SDKS.items():
-                    for pattern in patterns:
-                        if pattern.lower() in content.lower():
-                            found_sdks.append({
-                                "sdk": sdk_name,
-                                "file": filepath,
-                                "manager": pkg_manager,
-                            })
-
-            except ExternalAPIError as exc:
-                if exc.status_code in (401, 403):
-                    warnings.append(f"Access denied reading {filepath} in {repo}")
-                pass  # File doesn't exist in this repo
-
-        if found_sdks:
-            evidence.append(EvidenceItem(
-                obligation_id="S10.scope.sdks",
-                verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
-                source=f"github:{repo}:dependency_analysis", observed_at=now,
-                detail=f"Found {len(found_sdks)} tracker SDKs: {', '.join(s['sdk'] for s in found_sdks)}",
-                raw_metadata={"sdks": found_sdks},
-            ))
-
-        # Check AndroidManifest.xml for permissions
-        try:
-            manifest_path = "app/src/main/AndroidManifest.xml"
-            if Path(manifest_path).name in FORBIDDEN_FILES:
-                warnings.append(f"Blocked attempt to read forbidden file: {manifest_path}")
-            else:
-                manifest_resp = await client.get(
-                    f"/repos/{repo}/contents/{manifest_path}",
-                    operation="get_android_manifest",
-                )
-                import base64
-                manifest = base64.b64decode(manifest_resp.get("content", "")).decode("utf-8", errors="replace")
-    
-                found_permissions = []
-                for perm in SENSITIVE_PERMISSIONS:
-                    if perm in manifest:
-                        found_permissions.append(perm)
-    
-                if found_permissions:
-                    evidence.append(EvidenceItem(
-                        obligation_id="APP.permissions.justified",
-                        verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
-                        source=f"github:{repo}:android_manifest", observed_at=now,
-                        detail=f"Sensitive Android permissions found: {', '.join(found_permissions)}",
-                        raw_metadata={"permissions": found_permissions},
-                    ))
-        except ExternalAPIError as exc:
-            if exc.status_code in (401, 403):
-                warnings.append(f"Access denied reading AndroidManifest in {repo}")
-            pass
-
-        # Check Info.plist for iOS permissions
-        try:
-            plist_path = "ios/Runner/Info.plist" # common path for flutter, but could be ios/App/Info.plist etc. Let's just try ios/Runner for now as a representative check
-            if Path(plist_path).name in FORBIDDEN_FILES:
-                warnings.append(f"Blocked attempt to read forbidden file: {plist_path}")
-            else:
-                plist_resp = await client.get(
-                    f"/repos/{repo}/contents/{plist_path}",
-                    operation="get_info_plist",
-                )
-                import base64
-                plist_content = base64.b64decode(plist_resp.get("content", "")).decode("utf-8", errors="replace")
-                
-                found_ios_permissions = []
-                for perm in IOS_SENSITIVE_PERMISSIONS:
-                    if perm in plist_content:
-                        found_ios_permissions.append(perm)
-                        
-                if found_ios_permissions:
-                    evidence.append(EvidenceItem(
-                        obligation_id="APP.permissions.justified",
-                        verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
-                        source=f"github:{repo}:info_plist", observed_at=now,
-                        detail=f"Sensitive iOS permissions found: {', '.join(found_ios_permissions)}",
-                        raw_metadata={"ios_permissions": found_ios_permissions},
-                    ))
-        except ExternalAPIError as exc:
-            if exc.status_code in (401, 403):
-                warnings.append(f"Access denied reading Info.plist in {repo}")
-            pass
-
-        # Check for PII in logs, Form fields, and SDK initialization (sample key source files)
-        source_patterns = [
-            "app/src/main/java", "app/src/main/kotlin",
-            "src", "lib",
-        ]
-
-        pii_in_logs_found: list[dict[str, Any]] = []
-        forms_found: list[dict[str, Any]] = []
-        sdk_inits_found: list[dict[str, Any]] = []
+        sdk_files_map = {
+            "package.json": "npm",
+            "Podfile": "cocoapods",
+            "build.gradle": "gradle",
+            "pubspec.yaml": "flutter",
+        }
         
-        for src_dir in source_patterns:
+        ALLOWED_EXTENSIONS = {
+            ".java", ".kt", ".swift", ".js", ".ts", ".jsx", ".tsx",
+            ".dart", ".html", ".xml", ".plist", ".json", ".yaml", ".gradle"
+        }
+        
+        FORBIDDEN_DIRS = {
+            ".git", "node_modules", "build", "dist", "generated", "out"
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tar_path = Path(tmpdir) / "repo.tar.gz"
             try:
-                dir_resp = await client.get(
-                    f"/repos/{repo}/contents/{src_dir}",
-                    operation=f"list_{src_dir.replace('/', '_')}",
+                await client.download_file(
+                    f"/repos/{repo}/tarball",
+                    str(tar_path),
+                    operation="download_repo_archive",
                 )
-                if isinstance(dir_resp, list):
-                    for item in dir_resp[:20]:  # Limit scope
-                        if item.get("type") == "file":
-                            if Path(item.get("path", "")).name in FORBIDDEN_FILES:
-                                warnings.append(f"Blocked attempt to read forbidden file: {item.get('path', '')}")
-                                continue
-                            if any(
-                                item.get("name", "").endswith(ext)
-                                for ext in [".java", ".kt", ".swift", ".js", ".ts", ".dart", ".tsx", ".jsx", ".html"]
-                            ):
-                                try:
-                                    file_resp = await client.get(
-                                        item["url"].replace("https://api.github.com", ""),
-                                        operation="get_source_file",
-                                    )
-                                    import base64
-                                    file_content = base64.b64decode(
-                                        file_resp.get("content", "")
-                                    ).decode("utf-8", errors="replace")
-    
-                                    # Check PII logs
-                                    for pattern in PII_LOG_PATTERNS:
-                                        matches = pattern.findall(file_content)
-                                        if matches:
-                                            pii_in_logs_found.append({
-                                                "file": item.get("path", ""),
-                                                "match_count": len(matches),
-                                            })
-                                            break  # One match per file is enough
-                                            
-                                    # Check Form Fields
-                                    for pattern in FORM_FIELD_PATTERNS:
-                                        matches = pattern.findall(file_content)
-                                        if matches:
-                                            forms_found.append({
-                                                "file": item.get("path", ""),
-                                                "match_count": len(matches),
-                                            })
-                                            break
-                                            
-                                    # Check Tracker SDK Initialization
-                                    for pattern in TRACKER_SDK_INIT_PATTERNS:
-                                        matches = pattern.findall(file_content)
-                                        if matches:
-                                            # Check if there is consent gating nearby
-                                            is_gated = any(p.search(file_content) for p in CONSENT_GATING_PATTERNS)
-                                            sdk_inits_found.append({
-                                                "file": item.get("path", ""),
-                                                "sdk_init": matches[0],
-                                                "is_gated": is_gated,
-                                            })
-                                            break
-    
-                                    # DO NOT store file_content — ephemeral only
-    
-                                except ExternalAPIError as exc:
-                                    if exc.status_code in (401, 403):
-                                        warnings.append(f"Access denied reading {item.get('path', '')} in {repo}")
-                                    pass
             except ExternalAPIError as exc:
-                if exc.status_code in (401, 403):
-                    warnings.append(f"Access denied reading dir {src_dir} in {repo}")
-                pass
-
-        if pii_in_logs_found:
-            evidence.append(EvidenceItem(
-                obligation_id="APP.logging.noPII",
-                verdict=Verdict.NOT_OBSERVED, confidence=Confidence.MEDIUM,
-                source=f"github:{repo}:log_analysis", observed_at=now,
-                detail=(
-                    f"PII detected in logging statements across {len(pii_in_logs_found)} files. "
-                    f"Files: {', '.join(f['file'] for f in pii_in_logs_found[:5])}"
-                ),
-                raw_metadata={"files_with_pii_logs": len(pii_in_logs_found)},
-            ))
-
-        if forms_found:
-            evidence.append(EvidenceItem(
-                obligation_id="APP.forms.disclosure",
-                verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
-                source=f"github:{repo}:form_analysis", observed_at=now,
-                detail=f"Personal data form fields detected in {len(forms_found)} files.",
-                raw_metadata={"files_with_forms": len(forms_found)},
-            ))
+                raise exc
             
-        if sdk_inits_found:
-            evidence.append(EvidenceItem(
-                obligation_id="S10.scope.sdks",
-                verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
-                source=f"github:{repo}:sdk_init_analysis", observed_at=now,
-                detail=f"Tracker SDK initialization detected in {len(sdk_inits_found)} files.",
-                raw_metadata={"sdk_inits": sdk_inits_found},
-            ))
-            
-            # Check consent gating based on init finding
-            ungated_inits = [i for i in sdk_inits_found if not i["is_gated"]]
-            if ungated_inits:
-                evidence.append(EvidenceItem(
-                    obligation_id="S6.consentGating",
-                    verdict=Verdict.NOT_OBSERVED, confidence=Confidence.MEDIUM,
-                    source=f"github:{repo}:consent_gating", observed_at=now,
-                    detail=f"Found {len(ungated_inits)} SDK initializations without detectable consent gating.",
-                    raw_metadata={"ungated_inits": ungated_inits},
-                ))
-            else:
-                evidence.append(EvidenceItem(
-                    obligation_id="S6.consentGating",
-                    verdict=Verdict.OBSERVED, confidence=Confidence.MEDIUM,
-                    source=f"github:{repo}:consent_gating", observed_at=now,
-                    detail="All detected SDK initializations appear to have consent gating logic.",
-                    raw_metadata={"gated_inits_count": len(sdk_inits_found)},
-                ))
+            # Extract tarball
+            try:
+                with tarfile.open(tar_path, "r:gz") as tar:
+                    def is_within_directory(directory: str, target: str) -> bool:
+                        abs_directory = os.path.abspath(directory)
+                        abs_target = os.path.abspath(target)
+                        prefix = os.path.commonprefix([abs_directory, abs_target])
+                        return prefix == abs_directory
+
+                    def safe_extract(tar: tarfile.TarFile, path: str = ".") -> None:
+                        for member in tar.getmembers():
+                            member_path = os.path.join(path, member.name)
+                            if not is_within_directory(path, member_path):
+                                raise Exception("Attempted Path Traversal in Tar File")
+                        tar.extractall(path)
+
+                    safe_extract(tar, tmpdir)
+            except Exception as exc:
+                errors.append(f"Failed to extract archive for {repo}: {exc}")
+                return
+
+            extracted_items = list(Path(tmpdir).iterdir())
+            if tar_path in extracted_items:
+                extracted_items.remove(tar_path)
+                
+            if not extracted_items:
+                warnings.append(f"Repository {repo} appears to be empty.")
+                return
+                
+            extracted_repo_root = extracted_items[0] if extracted_items[0].is_dir() else Path(tmpdir)
+
+            for root, dirs, files in os.walk(extracted_repo_root):
+                # Filter dirs in-place
+                dirs[:] = [d for d in dirs if d not in FORBIDDEN_DIRS and not d.startswith(".")]
+                
+                for file_name in files:
+                    if file_name in FORBIDDEN_FILES:
+                        continue
+                        
+                    file_path = Path(root) / file_name
+                    rel_path = str(file_path.relative_to(extracted_repo_root)).replace("\\", "/")
+                    
+                    is_sdk_file = file_name in sdk_files_map
+                    is_allowed_ext = file_path.suffix in ALLOWED_EXTENSIONS or file_name in {"AndroidManifest.xml", "Info.plist"}
+                    
+                    if not (is_sdk_file or is_allowed_ext):
+                        continue
+                        
+                    # Skip large files (e.g. > 1MB)
+                    try:
+                        if file_path.stat().st_size > 1024 * 1024:
+                            continue
+                    except OSError:
+                        continue
+                        
+                    try:
+                        content = file_path.read_text(encoding="utf-8", errors="replace")
+                    except Exception:
+                        continue
+                        
+                    # 1. SDK inventory
+                    if is_sdk_file:
+                        pkg_manager = sdk_files_map.get(file_name, "unknown")
+                        for sdk_name, patterns in TRACKER_SDKS.items():
+                            for pattern in patterns:
+                                if pattern.lower() in content.lower():
+                                    line_no = 1
+                                    for i, line in enumerate(content.splitlines(), 1):
+                                        if pattern.lower() in line.lower():
+                                            line_no = i
+                                            break
+                                            
+                                    evidence.append(EvidenceItem(
+                                        obligation_id="S10.scope.sdks",
+                                        verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
+                                        source=f"github:{repo}:{rel_path}", observed_at=now,
+                                        detail=f"Found tracker SDK '{sdk_name}' in {rel_path} at line {line_no}.",
+                                        structured_detail=StructuredEvidence(
+                                            source="github", integration="github", operation="static_analysis",
+                                            resource_type="file", resource_id=f"{repo}/{rel_path}", resource_name=file_name, location=f"{repo} > {rel_path}#L{line_no}",
+                                            observed_at=now, observed_state=f"Contains {sdk_name}", expected_state="SDK documented",
+                                            detail=f"Found tracker SDK '{sdk_name}' in {rel_path} at line {line_no}.",
+                                            reason=f"The SDK '{sdk_name}' was detected in the project manifests.",
+                                            metadata={
+                                                "repository": repo,
+                                                "file_path": rel_path,
+                                                "line": line_no,
+                                                "category": "Scope",
+                                                "matched_rule": "S10.scope.sdks",
+                                                "recommended_action": "Document SDK in privacy policy and scope.",
+                                                "manager": pkg_manager
+                                            }
+                                        )
+                                    ))
+                                    break # Only report once per SDK per file
+                                    
+                    # 2. Android permissions
+                    if file_name == "AndroidManifest.xml":
+                        for perm in SENSITIVE_PERMISSIONS:
+                            if perm in content:
+                                line_no = next((i for i, line in enumerate(content.splitlines(), 1) if perm in line), 1)
+                                evidence.append(EvidenceItem(
+                                    obligation_id="APP.permissions.justified",
+                                    verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
+                                    source=f"github:{repo}:{rel_path}:{perm}", observed_at=now,
+                                    detail=f"Sensitive Android permission found: {perm} at line {line_no}.",
+                                    structured_detail=StructuredEvidence(
+                                        source="github", integration="github", operation="static_analysis",
+                                        resource_type="file", resource_id=f"{repo}/{rel_path}", resource_name=file_name, location=f"{repo} > {rel_path}#L{line_no}",
+                                        observed_at=now, observed_state=f"Contains {perm}", expected_state="Permission justified",
+                                        detail=f"Sensitive Android permission found: {perm} at line {line_no}.",
+                                        reason="A sensitive device permission was requested in the AndroidManifest.xml.",
+                                        metadata={
+                                            "repository": repo,
+                                            "file_path": rel_path,
+                                            "line": line_no,
+                                            "category": "App Permissions",
+                                            "matched_rule": "APP.permissions.justified",
+                                            "recommended_action": "Provide justification for requested permission."
+                                        }
+                                    )
+                                ))
+                                
+                    # 3. iOS permissions
+                    if file_name == "Info.plist":
+                        for perm in IOS_SENSITIVE_PERMISSIONS:
+                            if perm in content:
+                                line_no = next((i for i, line in enumerate(content.splitlines(), 1) if perm in line), 1)
+                                evidence.append(EvidenceItem(
+                                    obligation_id="APP.permissions.justified",
+                                    verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
+                                    source=f"github:{repo}:{rel_path}:{perm}", observed_at=now,
+                                    detail=f"Sensitive iOS permission found: {perm} at line {line_no}.",
+                                    structured_detail=StructuredEvidence(
+                                        source="github", integration="github", operation="static_analysis",
+                                        resource_type="file", resource_id=f"{repo}/{rel_path}", resource_name=file_name, location=f"{repo} > {rel_path}#L{line_no}",
+                                        observed_at=now, observed_state=f"Contains {perm}", expected_state="Permission justified",
+                                        detail=f"Sensitive iOS permission found: {perm} at line {line_no}.",
+                                        reason="A sensitive device permission was requested in the Info.plist.",
+                                        metadata={
+                                            "repository": repo,
+                                            "file_path": rel_path,
+                                            "line": line_no,
+                                            "category": "App Permissions",
+                                            "matched_rule": "APP.permissions.justified",
+                                            "recommended_action": "Provide justification for requested permission."
+                                        }
+                                    )
+                                ))
+
+                    # 4. Source code checks (PII, forms, SDK init)
+                    if file_path.suffix in {".java", ".kt", ".swift", ".js", ".ts", ".jsx", ".tsx", ".dart", ".html"}:
+                        lines = content.splitlines()
+                        pii_found = False
+                        form_found = False
+                        init_found = False
+                        
+                        for i, line in enumerate(lines, 1):
+                            if not pii_found:
+                                for pattern in PII_LOG_PATTERNS:
+                                    if pattern.search(line):
+                                        pii_found = True
+                                        evidence.append(EvidenceItem(
+                                            obligation_id="APP.logging.noPII",
+                                            verdict=Verdict.NOT_OBSERVED, confidence=Confidence.MEDIUM,
+                                            source=f"github:{repo}:{rel_path}", observed_at=now,
+                                            detail=f"PII detected in logging statement in {rel_path} at line {i}.",
+                                            structured_detail=StructuredEvidence(
+                                                source="github", integration="github", operation="static_analysis",
+                                                resource_type="file", resource_id=f"{repo}/{rel_path}", resource_name=file_name, location=f"{repo} > {rel_path}#L{i}",
+                                                observed_at=now, observed_state="PII logging present", expected_state="No PII logging",
+                                                detail=f"PII detected in logging statement in {rel_path} at line {i}.",
+                                                reason="Logging statement references a PII field name (email, phone, name, address).",
+                                                metadata={
+                                                    "repository": repo,
+                                                    "file_path": rel_path,
+                                                    "line": i,
+                                                    "category": "Security",
+                                                    "matched_rule": "APP.logging.noPII",
+                                                    "recommended_action": "Remove PII from logging output."
+                                                }
+                                            )
+                                        ))
+                                        break
+                                        
+                            if not form_found:
+                                for pattern in FORM_FIELD_PATTERNS:
+                                    if pattern.search(line):
+                                        form_found = True
+                                        evidence.append(EvidenceItem(
+                                            obligation_id="APP.forms.disclosure",
+                                            verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
+                                            source=f"github:{repo}:{rel_path}", observed_at=now,
+                                            detail=f"Personal data form fields detected in {rel_path} at line {i}.",
+                                            structured_detail=StructuredEvidence(
+                                                source="github", integration="github", operation="static_analysis",
+                                                resource_type="file", resource_id=f"{repo}/{rel_path}", resource_name=file_name, location=f"{repo} > {rel_path}#L{i}",
+                                                observed_at=now, observed_state="Form fields present", expected_state="N/A",
+                                                detail=f"Personal data form fields detected in {rel_path} at line {i}.",
+                                                reason="Form elements designed to collect personal data were found in the UI code.",
+                                                metadata={
+                                                    "repository": repo,
+                                                    "file_path": rel_path,
+                                                    "line": i,
+                                                    "category": "Forms",
+                                                    "matched_rule": "APP.forms.disclosure",
+                                                    "recommended_action": "Add a privacy disclosure statement near the form."
+                                                }
+                                            )
+                                        ))
+                                        break
+                                        
+                            if not init_found:
+                                for pattern in TRACKER_SDK_INIT_PATTERNS:
+                                    match = pattern.search(line)
+                                    if match:
+                                        init_found = True
+                                        is_gated = any(p.search(content) for p in CONSENT_GATING_PATTERNS)
+                                        
+                                        evidence.append(EvidenceItem(
+                                            obligation_id="S10.scope.sdks",
+                                            verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
+                                            source=f"github:{repo}:{rel_path}", observed_at=now,
+                                            detail=f"Tracker SDK initialization detected in {rel_path} at line {i}.",
+                                            structured_detail=StructuredEvidence(
+                                                source="github", integration="github", operation="static_analysis",
+                                                resource_type="file", resource_id=f"{repo}/{rel_path}", resource_name=file_name, location=f"{repo} > {rel_path}#L{i}",
+                                                observed_at=now, observed_state="SDK init present", expected_state="N/A",
+                                                detail=f"Tracker SDK initialization detected in {rel_path} at line {i}.",
+                                                reason="A tracker SDK initialization was observed in the source code.",
+                                                metadata={
+                                                    "repository": repo,
+                                                    "file_path": rel_path,
+                                                    "line": i,
+                                                    "category": "Scope",
+                                                    "matched_rule": "S10.scope.sdks",
+                                                    "recommended_action": "Verify SDK initialization is intended.",
+                                                    "sdk_init": match.group(0)
+                                                }
+                                            )
+                                        ))
+                                        
+                                        if not is_gated:
+                                            evidence.append(EvidenceItem(
+                                                obligation_id="S6.consentGating",
+                                                verdict=Verdict.NOT_OBSERVED, confidence=Confidence.MEDIUM,
+                                                source=f"github:{repo}:{rel_path}:consent_gating", observed_at=now,
+                                                detail=f"SDK initialization in {rel_path} at line {i} has no detectable consent gating.",
+                                                structured_detail=StructuredEvidence(
+                                                    source="github", integration="github", operation="static_analysis",
+                                                    resource_type="file", resource_id=f"{repo}/{rel_path}", resource_name=file_name, location=f"{repo} > {rel_path}#L{i}",
+                                                    observed_at=now, observed_state="No consent gating", expected_state="Consent gating present",
+                                                    detail=f"SDK initialization in {rel_path} at line {i} has no detectable consent gating.",
+                                                    reason="SDK is initialized without any detectable consent check guard.",
+                                                    metadata={
+                                                        "repository": repo,
+                                                        "file_path": rel_path,
+                                                        "line": i,
+                                                        "category": "Consent",
+                                                        "matched_rule": "S6.consentGating",
+                                                        "recommended_action": "Gate initialization behind a consent check."
+                                                    }
+                                                )
+                                            ))
+                                        else:
+                                            evidence.append(EvidenceItem(
+                                                obligation_id="S6.consentGating",
+                                                verdict=Verdict.OBSERVED, confidence=Confidence.MEDIUM,
+                                                source=f"github:{repo}:{rel_path}:consent_gating", observed_at=now,
+                                                detail=f"SDK initialization in {rel_path} at line {i} has detectable consent gating.",
+                                                structured_detail=StructuredEvidence(
+                                                    source="github", integration="github", operation="static_analysis",
+                                                    resource_type="file", resource_id=f"{repo}/{rel_path}", resource_name=file_name, location=f"{repo} > {rel_path}#L{i}",
+                                                    observed_at=now, observed_state="Consent gating present", expected_state="Consent gating present",
+                                                    detail=f"SDK initialization in {rel_path} at line {i} has detectable consent gating.",
+                                                    reason="SDK initialization is guarded by a consent check.",
+                                                    metadata={
+                                                        "repository": repo,
+                                                        "file_path": rel_path,
+                                                        "line": i,
+                                                        "category": "Consent",
+                                                        "matched_rule": "S6.consentGating",
+                                                        "recommended_action": "None."
+                                                    }
+                                                )
+                                            ))
+                                        break

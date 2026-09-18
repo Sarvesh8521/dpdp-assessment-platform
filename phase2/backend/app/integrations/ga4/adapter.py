@@ -23,6 +23,7 @@ from app.integrations.base.adapter import (
     AdapterResult, ConnectionInfo, HealthStatus, IntegrationAdapter,
 )
 from app.integrations.base.http_client import AuditedHTTPClient, ExternalAPIError
+from app.domain.evidence import StructuredEvidence
 
 logger = get_logger(__name__)
 
@@ -176,6 +177,14 @@ class GA4Adapter(IntegrationAdapter):
                     verdict=Verdict.CANNOT_DETERMINE, confidence=Confidence.LOW,
                     source="ga4:list_properties", observed_at=now,
                     detail="No GA4 properties found.",
+                    structured_detail=StructuredEvidence(
+                        source="ga4", integration="ga4", operation="list_account_summaries",
+                        resource_type="property",
+                        location="Unavailable",
+                        observed_at=now, observed_state="0 properties", expected_state=">=1 GA4 property",
+                        detail="No GA4 properties found.",
+                        reason="No properties accessible with the provided credentials.",
+                    ),
                 ))
                 return AdapterResult(evidence=evidence, errors=errors)
 
@@ -206,7 +215,13 @@ class GA4Adapter(IntegrationAdapter):
                                 verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
                                 source="ga4:data_retention", observed_at=now,
                                 detail=f"Data retention: {event_retention}, reset on activity: {reset_on_activity}",
-                                raw_metadata={"retention": event_retention, "reset_on_activity": reset_on_activity},
+                                structured_detail=StructuredEvidence(
+                                    source="ga4", integration="ga4", operation="get_data_retention",
+                                    resource_type="property_setting", resource_id=prop_name, resource_name=prop_summary.get("displayName", prop_name),
+                                    location=f"Property: {prop_name} ({prop_summary.get('displayName', prop_name)}) > Data Retention",
+                                    observed_at=now, observed_state=str(event_retention), expected_state="< 14 months",
+                                    detail=f"Data retention: {event_retention}, reset on activity: {reset_on_activity}",
+                                )
                             ))
                         else:
                             evidence.append(EvidenceItem(
@@ -214,7 +229,14 @@ class GA4Adapter(IntegrationAdapter):
                                 verdict=Verdict.NOT_OBSERVED, confidence=Confidence.HIGH,
                                 source="ga4:data_retention", observed_at=now,
                                 detail=f"Retention set to maximum ({event_retention}) — requires documented justification.",
-                                raw_metadata={"retention": event_retention},
+                                structured_detail=StructuredEvidence(
+                                    source="ga4", integration="ga4", operation="get_data_retention",
+                                    resource_type="property_setting", resource_id=prop_name, resource_name=prop_summary.get("displayName", prop_name),
+                                    location=f"Property: {prop_name} ({prop_summary.get('displayName', prop_name)}) > Data Retention",
+                                    observed_at=now, observed_state=str(event_retention), expected_state="< 14 months",
+                                    detail=f"Retention set to maximum ({event_retention}) — requires documented justification.",
+                                    reason="Maximum retention requires documented justification per data minimization principles.",
+                                )
                             ))
                     except ExternalAPIError:
                         errors.append(f"Could not read retention for {prop_name}")
@@ -232,7 +254,13 @@ class GA4Adapter(IntegrationAdapter):
                                 verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
                                 source="ga4:google_signals", observed_at=now,
                                 detail="Google Signals is enabled — cross-device identification active.",
-                                raw_metadata={"signals_state": signals_state},
+                                structured_detail=StructuredEvidence(
+                                    source="ga4", integration="ga4", operation="get_google_signals",
+                                    resource_type="property_setting", resource_id=prop_name, resource_name=prop_summary.get("displayName", prop_name),
+                                    location=f"Property: {prop_name} ({prop_summary.get('displayName', prop_name)}) > Google Signals",
+                                    observed_at=now, observed_state=signals_state, expected_state="GOOGLE_SIGNALS_DISABLED",
+                                    detail="Google Signals is enabled — cross-device identification active."
+                                )
                             ))
                         else:
                             evidence.append(EvidenceItem(
@@ -240,6 +268,13 @@ class GA4Adapter(IntegrationAdapter):
                                 verdict=Verdict.NOT_OBSERVED, confidence=Confidence.HIGH,
                                 source="ga4:google_signals", observed_at=now,
                                 detail=f"Google Signals state: {signals_state}",
+                                structured_detail=StructuredEvidence(
+                                    source="ga4", integration="ga4", operation="get_google_signals",
+                                    resource_type="property_setting", resource_id=prop_name, resource_name=prop_summary.get("displayName", prop_name),
+                                    location=f"Property: {prop_name} ({prop_summary.get('displayName', prop_name)}) > Google Signals",
+                                    observed_at=now, observed_state=signals_state, expected_state="GOOGLE_SIGNALS_DISABLED",
+                                    detail=f"Google Signals state: {signals_state}"
+                                )
                             ))
                     except ExternalAPIError:
                         errors.append(f"Could not read Signals for {prop_name}")
@@ -260,7 +295,14 @@ class GA4Adapter(IntegrationAdapter):
                                     verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
                                     source=f"ga4:{link_type}", observed_at=now,
                                     detail=f"Linked service found: {link_type} ({len(link_items)} links)",
-                                    raw_metadata={"link_type": link_type, "count": len(link_items)},
+                                    structured_detail=StructuredEvidence(
+                                        source="ga4", integration="ga4", operation=f"list_{link_type}",
+                                        resource_type="linked_service", resource_id=prop_name, resource_name=prop_summary.get("displayName", prop_name),
+                                        location=f"Property: {prop_name} ({prop_summary.get('displayName', prop_name)}) > Linked Service: {link_type}",
+                                        observed_at=now, observed_state=f"{len(link_items)} links to {link_type}",
+                                        expected_state="Data sharing documented",
+                                        detail=f"Linked service found: {link_type} ({len(link_items)} links)",
+                                    )
                                 ))
                         except ExternalAPIError:
                             pass  # Not all link types exist for all properties
@@ -281,6 +323,14 @@ class GA4Adapter(IntegrationAdapter):
                                         verdict=Verdict.OBSERVED, confidence=Confidence.MEDIUM,
                                         source="ga4:enhanced_measurement", observed_at=now,
                                         detail=f"Enhanced measurement enabled on stream {stream.get('displayName', '')}",
+                                        structured_detail=StructuredEvidence(
+                                            source="ga4", integration="ga4", operation="list_data_streams",
+                                            resource_type="data_stream", resource_id=stream.get("name", ""), resource_name=stream.get("displayName", ""),
+                                            location=f"Property: {prop_name} ({prop_summary.get('displayName', prop_name)}) > Stream: {stream.get('name', '')} ({stream.get('displayName', '')})",
+                                            observed_at=now, observed_state="Enhanced measurement enabled", expected_state="Enhanced measurement evaluated",
+                                            detail=f"Enhanced measurement enabled on stream {stream.get('displayName', '')}",
+                                            metadata={"em_settings": em_settings}
+                                        )
                                     ))
                     except ExternalAPIError:
                         pass
@@ -301,7 +351,15 @@ class GA4Adapter(IntegrationAdapter):
                                     verdict=Verdict.OBSERVED, confidence=Confidence.MEDIUM,
                                     source="ga4:custom_dimensions", observed_at=now,
                                     detail=f"Custom dimension '{dim_name}' has a name suggesting PII. Flag for human review.",
-                                    raw_metadata={"parameter_name": dim_name, "scope": dim.get("scope", "")},
+                                    structured_detail=StructuredEvidence(
+                                        source="ga4", integration="ga4", operation="list_custom_dimensions",
+                                        resource_type="custom_dimension", resource_id=dim.get("name", ""), resource_name=dim_name,
+                                        location=f"Property: {prop_name} ({prop_summary.get('displayName', prop_name)}) > Custom Dimension: {dim_name}",
+                                        observed_at=now, observed_state="Potential PII dimension", expected_state="No PII dimensions",
+                                        detail=f"Custom dimension '{dim_name}' has a name suggesting PII.",
+                                        metadata={"parameter_name": dim_name, "scope": dim.get("scope", "")},
+                                        reason="Dimension name matches known PII patterns."
+                                    )
                                 ))
                     except ExternalAPIError:
                         pass
@@ -319,6 +377,15 @@ class GA4Adapter(IntegrationAdapter):
                     verdict=Verdict.CANNOT_DETERMINE, confidence=Confidence.LOW,
                     source="ga4:error", observed_at=now,
                     detail=f"GA4 collection failed: {exc}",
+                    structured_detail=StructuredEvidence(
+                        source="ga4", integration="ga4", operation="list_account_summaries",
+                        resource_type="property",
+                        location="Unavailable",
+                        observed_at=now, observed_state="Collection error",
+                        expected_state="Successful collection",
+                        detail=f"GA4 collection failed: {exc}",
+                        reason=f"API error: {exc}",
+                    ),
                 )],
                 errors=[str(exc)], partial=True,
             )

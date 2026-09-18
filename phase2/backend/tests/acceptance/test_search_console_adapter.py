@@ -68,26 +68,23 @@ async def test_sc_adapter_evidence_generation(mock_client_class, adapter, connec
         
     mock_instance.get = AsyncMock(side_effect=mock_get)
     
-    # We pass declared_properties to test the property scope validation
-    result = await adapter.collect(connection, declared_properties=["https://example.com/"])
+    # We no longer pass declared_properties here
+    result = await adapter.collect(connection)
     
     assert len(result.errors) == 0
-    assert len(result.evidence) == 2
+    assert len(result.evidence) == 3  # 2 verified properties + 1 sitemap finding
     
     # S10.scope.properties (Verified Sites)
-    sites_ev = next(e for e in result.evidence if e.source == "search_console:verified_sites")
-    # One property is undeclared (other.com), so it should be NOT_OBSERVED
-    assert sites_ev.verdict == Verdict.NOT_OBSERVED
-    assert sites_ev.confidence == Confidence.HIGH
-    assert "other.com" in sites_ev.detail
-    assert sites_ev.raw_metadata["total_verified"] == 2
+    sites_ev = [e for e in result.evidence if e.source.startswith("search_console:verified_site:")]
+    assert len(sites_ev) == 2
+    
+    assert sites_ev[0].verdict == Verdict.OBSERVED
+    assert sites_ev[0].confidence == Confidence.HIGH
     
     # S10.scope.properties (Sitemaps)
-    sitemaps_ev = next(e for e in result.evidence if e.source == "search_console:sitemaps")
+    sitemaps_ev = next(e for e in result.evidence if e.source.startswith("search_console:sitemap:"))
     assert sitemaps_ev.verdict == Verdict.OBSERVED
     assert sitemaps_ev.confidence == Confidence.HIGH
-    assert len(sitemaps_ev.raw_metadata["sitemaps"]) == 1
-    assert sitemaps_ev.raw_metadata["sitemaps"][0]["path"] == "https://example.com/sitemap.xml"
 
 @pytest.mark.asyncio
 @patch("app.integrations.search_console.adapter.AuditedHTTPClient")

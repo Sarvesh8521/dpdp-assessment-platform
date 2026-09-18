@@ -201,12 +201,18 @@ class GoogleOAuthHandler:
                 logger.error("google_oauth_token_exchange_failed", error=str(e))
                 raise OAuthError(f"Google OAuth token exchange failed: {e}")
 
-    async def refresh_access_token(self, refresh_token: str) -> dict[str, Any]:
-        """Refresh an expired access token using a refresh token."""
-        audit_cb = kwargs.get("audit_callback") if "audit_callback" in kwargs else None
+    async def refresh_access_token(
+        self,
+        client_id: str,
+        provider: str,
+        refresh_token: str,
+        **kwargs: Any
+    ) -> dict[str, Any]:
+        """Refresh an expired access token using a refresh token and store securely."""
+        audit_cb = kwargs.get("audit_callback")
         async with AuditedHTTPClient(provider="google", audit_callback=audit_cb) as client:
             try:
-                return await client.post(
+                new_tokens = await client.post(
                     self.GOOGLE_TOKEN_URL,
                     data={
                         "client_id": self.settings.google_client_id,
@@ -216,6 +222,13 @@ class GoogleOAuthHandler:
                     },
                     operation="google_oauth_refresh"
                 )
+                
+                # Keep the original refresh token if the response doesn't return a new one
+                if "refresh_token" not in new_tokens:
+                    new_tokens["refresh_token"] = refresh_token
+                    
+                await self.store_tokens_securely(client_id, provider, new_tokens)
+                return new_tokens
             except Exception as e:
                 logger.error("google_token_refresh_failed", error=str(e))
                 raise OAuthError(f"Google token refresh failed: {e}")
@@ -281,30 +294,36 @@ class MetaOAuthHandler:
 
     async def exchange_code(self, code: str, redirect_uri: str, **kwargs: Any) -> dict[str, Any]:
         """Exchange Meta auth code for access token."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                self.META_TOKEN_URL,
-                params={
-                    "client_id": self.settings.meta_app_id,
-                    "client_secret": self.settings.meta_app_secret,
-                    "code": code,
-                    "redirect_uri": redirect_uri,
-                },
-            )
-            if not resp.is_success:
-                raise OAuthError(f"Meta OAuth token exchange failed: {resp.status_code}")
-            return resp.json()
+        audit_cb = kwargs.get("audit_callback")
+        async with AuditedHTTPClient(provider="meta", audit_callback=audit_cb) as client:
+            try:
+                return await client.get(
+                    self.META_TOKEN_URL,
+                    params={
+                        "client_id": self.settings.meta_app_id,
+                        "client_secret": self.settings.meta_app_secret,
+                        "code": code,
+                        "redirect_uri": redirect_uri,
+                    },
+                    operation="meta_oauth_exchange",
+                )
+            except Exception as e:
+                logger.error("meta_oauth_token_exchange_failed", error=str(e))
+                raise OAuthError(f"Meta OAuth token exchange failed: {e}")
 
     async def fetch_user_info(self, access_token: str, **kwargs: Any) -> dict[str, Any]:
         """Fetch Meta user profile."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                self.META_ME_URL,
-                params={"access_token": access_token, "fields": "id,name,email"},
-            )
-            if not resp.is_success:
-                raise OAuthError(f"Failed to fetch Meta user info: {resp.status_code}")
-            return resp.json()
+        audit_cb = kwargs.get("audit_callback")
+        async with AuditedHTTPClient(provider="meta", access_token=access_token, audit_callback=audit_cb) as client:
+            try:
+                return await client.get(
+                    self.META_ME_URL,
+                    params={"fields": "id,name,email"},
+                    operation="meta_fetch_user_info",
+                )
+            except Exception as e:
+                logger.error("meta_fetch_user_info_failed", error=str(e))
+                raise OAuthError(f"Failed to fetch Meta user info: {e}")
 
     async def store_tokens_securely(
         self,
@@ -398,7 +417,7 @@ class GitHubAppHandler:
         }
         return jose_jwt.encode(payload, private_key, algorithm="RS256")
 
-    async def get_installation_token(self, installation_id: str) -> dict[str, Any]:
+    async def get_installation_token(self, installation_id: str, **kwargs: Any) -> dict[str, Any]:
         """Generate an installation access token for the GitHub App.
 
         Uses JWT authentication to call POST /app/installations/{id}/access_tokens.
@@ -411,27 +430,29 @@ class GitHubAppHandler:
             # Return empty — caller will handle gracefully
             return {}
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.GITHUB_API_BASE}/app/installations/{installation_id}/access_tokens",
-                headers={
-                    "Authorization": f"Bearer {app_jwt}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
-            if not resp.is_success:
+        audit_cb = kwargs.get("audit_callback")
+        async with AuditedHTTPClient(provider="github", audit_callback=audit_cb) as client:
+            try:
+                return await client.post(
+                    f"{self.GITHUB_API_BASE}/app/installations/{installation_id}/access_tokens",
+                    headers={
+                        "Authorization": f"Bearer {app_jwt}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                    operation="github_installation_token",
+                )
+            except Exception as e:
                 logger.error(
                     "github_installation_token_failed",
-                    status_code=resp.status_code,
+                    error=str(e),
                     installation_id=installation_id,
                 )
                 raise OAuthError(
-                    f"Failed to get GitHub installation token: {resp.status_code}"
+                    f"Failed to get GitHub installation token: {e}"
                 )
-            return resp.json()
 
-    async def fetch_user_installations(self, access_token: str) -> list[dict[str, Any]]:
+    async def fetch_user_installations(self, access_token: str, **kwargs: Any) -> list[dict[str, Any]]:
         """Fetch the GitHub App installations accessible to the user.
 
         Requires a user-level access token from the GitHub App OAuth flow.
@@ -439,18 +460,18 @@ class GitHubAppHandler:
         if not access_token:
             return []
             
-        async with httpx.AsyncClient() as client:
+        audit_cb = kwargs.get("audit_callback")
+        async with AuditedHTTPClient(provider="github", access_token=access_token, audit_callback=audit_cb) as client:
             try:
                 resp = await client.get(
                     f"{self.GITHUB_API_BASE}/user/installations",
                     headers={
-                        "Authorization": f"Bearer {access_token}",
                         "Accept": "application/vnd.github+json",
                         "X-GitHub-Api-Version": "2022-11-28",
                     },
+                    operation="github_user_installations",
                 )
-                if resp.is_success:
-                    return resp.json().get("installations", [])
+                return resp.get("installations", [])
             except Exception as e:
                 logger.warning("github_fetch_installations_failed", error=str(e))
             return []
@@ -461,40 +482,44 @@ class GitHubAppHandler:
         This is part of the GitHub App's "user authorization" flow.
         The code is sent by GitHub after the user authorizes/installs the App.
         """
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                self.GITHUB_TOKEN_URL,
-                data={
-                    "client_id": self.settings.github_client_id,
-                    "client_secret": self.settings.github_client_secret,
-                    "code": code,
-                },
-                headers={"Accept": "application/json"},
-            )
-            if not resp.is_success:
-                raise OAuthError(f"GitHub App code exchange failed: {resp.status_code}")
-            data = resp.json()
-            if "error" in data:
-                raise OAuthError(
-                    f"GitHub App code exchange error: {data.get('error_description', data['error'])}"
+        audit_cb = kwargs.get("audit_callback")
+        async with AuditedHTTPClient(provider="github", audit_callback=audit_cb) as client:
+            try:
+                data = await client.post(
+                    self.GITHUB_TOKEN_URL,
+                    data={
+                        "client_id": self.settings.github_client_id,
+                        "client_secret": self.settings.github_client_secret,
+                        "code": code,
+                    },
+                    headers={"Accept": "application/json"},
+                    operation="github_oauth_exchange",
                 )
-            return data
+                if "error" in data:
+                    raise OAuthError(
+                        f"GitHub App code exchange error: {data.get('error_description', data['error'])}"
+                    )
+                return data
+            except Exception as e:
+                logger.error("github_oauth_exchange_failed", error=str(e))
+                if isinstance(e, OAuthError):
+                    raise
+                raise OAuthError(f"GitHub App code exchange failed: {e}")
 
     async def fetch_user_info(self, access_token: str, **kwargs: Any) -> dict[str, Any]:
         """Fetch GitHub user profile (login, name, email)."""
         if not access_token:
             return {}
-        async with httpx.AsyncClient() as client:
+        audit_cb = kwargs.get("audit_callback")
+        async with AuditedHTTPClient(provider="github", access_token=access_token, audit_callback=audit_cb) as client:
             try:
-                resp = await client.get(
+                return await client.get(
                     self.GITHUB_USER_URL,
                     headers={
-                        "Authorization": f"Bearer {access_token}",
                         "Accept": "application/vnd.github+json",
                     },
+                    operation="github_fetch_user_info",
                 )
-                if resp.is_success:
-                    return resp.json()
             except Exception:
                 pass
             return {}

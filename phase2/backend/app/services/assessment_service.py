@@ -54,33 +54,51 @@ class AssessmentService:
         self.run_repo = TenantIsolatedRepository(AssessmentRun, session, client_id)
 
     async def _ensure_obligations_seeded(self) -> dict[str, uuid.UUID]:
-        """Ensure all DPDP obligations exist in the database and return code -> id map."""
+        """Ensure all DPDP obligations exist in the database and return code -> id map.
+
+        Version-aware: if the register version has changed, existing obligations
+        are updated in-place (title, description, severity, source_reference, version)
+        while preserving their stable UUID.
+        """
+        from app.domain.obligations import REGISTER_VERSION
+
         obl_result = await self.session.execute(select(Obligation))
-        obligations = {o.code: o.id for o in obl_result.scalars().all()}
+        existing = {o.code: o for o in obl_result.scalars().all()}
+        obligations: dict[str, uuid.UUID] = {}
 
-        missing_obligations = []
         for ob in OBLIGATIONS:
-            if ob["code"] not in obligations:
-                missing_obligations.append(
-                    Obligation(
-                        code=ob["code"],
-                        title=ob["title"],
-                        description=ob.get("description", ""),
-                        category=ObligationCategory(ob["category"]),
-                        severity=ObligationSeverity(ob["severity"]),
-                        active=True,
-                        dpdp_section=ob.get("dpdp_section", ""),
-                    )
+            code = ob["code"]
+            if code in existing:
+                db_obl = existing[code]
+                obligations[code] = db_obl.id
+                # Update if register version changed
+                if db_obl.version != REGISTER_VERSION:
+                    db_obl.title = ob["title"]
+                    db_obl.description = ob.get("description", "")
+                    db_obl.category = ObligationCategory(ob["category"])
+                    db_obl.severity = ObligationSeverity(ob["severity"])
+                    db_obl.dpdp_section = ob.get("dpdp_section", "")
+                    db_obl.source_reference = ob.get("source_reference")
+                    db_obl.version = REGISTER_VERSION
+                    db_obl.active = True
+                    logger.info("obligation_updated", code=code, version=REGISTER_VERSION)
+            else:
+                new_obl = Obligation(
+                    id=uuid.uuid4(),
+                    code=code,
+                    title=ob["title"],
+                    description=ob.get("description", ""),
+                    category=ObligationCategory(ob["category"]),
+                    severity=ObligationSeverity(ob["severity"]),
+                    active=True,
+                    dpdp_section=ob.get("dpdp_section", ""),
+                    version=REGISTER_VERSION,
+                    source_reference=ob.get("source_reference"),
                 )
+                self.session.add(new_obl)
+                obligations[code] = new_obl.id
 
-        if missing_obligations:
-            for o in missing_obligations:
-                if not getattr(o, "id", None):
-                    o.id = uuid.uuid4()
-                self.session.add(o)
-                obligations[o.code] = o.id
-            await self.session.flush()
-
+        await self.session.flush()
         return obligations
 
     async def _resolve_access_token(self, db_conn: Connection | None, provider: str) -> tuple[str, str | None]:
@@ -127,7 +145,11 @@ class AssessmentService:
                 try:
                     from app.api.v1.oauth_handlers import GoogleOAuthHandler
                     handler = GoogleOAuthHandler()
-                    new_tokens = await handler.refresh_access_token(refresh_token)
+                    new_tokens = await handler.refresh_access_token(
+                        client_id=str(self.client_id),
+                        provider=provider,
+                        refresh_token=refresh_token
+                    )
                     if new_tokens.get("access_token"):
                         access_token = new_tokens["access_token"]
                         token_data["access_token"] = access_token
@@ -141,14 +163,10 @@ class AssessmentService:
                                 new_expiry = min(new_expiry, client_model.engagement_end)
                             if db_conn:
                                 db_conn.expires_at = new_expiry
-                        await secret_manager.store_secret(
-                            str(self.client_id),
-                            f"{db_conn.provider}_oauth_token",
-                            json.dumps(token_data)
-                        )
                         logger.info("google_token_auto_refreshed", provider=provider)
                 except Exception as ref_err:
                     logger.warning("google_token_refresh_failed", error=str(ref_err))
+                    return "", "Authentication failed (token expired and could not be refreshed). Re-authentication required."
 
         return access_token, None
 
@@ -172,6 +190,7 @@ class AssessmentService:
 
         evidence_by_source: dict[str, list[EvidenceItem]] = {}
         all_db_evidence: list[tuple[Evidence, str]] = []
+        is_demo = assessment.configuration.get("is_demo", False)
 
         # 1. Collect evidence for each integration
         for integration in data.config.integrations:
@@ -193,7 +212,7 @@ class AssessmentService:
                     continue
 
                 # ── Demo Mode Execution ──
-                if settings.demo_mode:
+                if is_demo:
                     from app.integrations.fixtures import FIXTURES_BY_INTEGRATION
                     fixture_items = FIXTURES_BY_INTEGRATION.get(integration) or FIXTURES_BY_INTEGRATION.get(adapter.id, [])
                     evidence_by_source[adapter.id] = fixture_items
@@ -210,6 +229,7 @@ class AssessmentService:
                             observed_at=item.observed_at,
                             detail=item.detail,
                             sanitized_metadata=item.raw_metadata,
+                            structured_detail=item.structured_detail.model_dump() if item.structured_detail else None,
                         )
                         all_db_evidence.append((ev, item.obligation_id))
                     continue
@@ -257,6 +277,7 @@ class AssessmentService:
                                 observed_at=ev_item.observed_at,
                                 detail=ev_item.detail,
                                 sanitized_metadata=ev_item.raw_metadata,
+                                structured_detail=ev_item.structured_detail.model_dump(mode="json") if getattr(ev_item, 'structured_detail', None) else None,
                             )
                             all_db_evidence.append((ev, ev_item.obligation_id))
                         continue
@@ -271,19 +292,61 @@ class AssessmentService:
                     if real_adapter := get_cmp_adapter(cmp_provider):
                         adapter = real_adapter
 
+                conn_metadata = dict(db_conn.provider_metadata or {}) if db_conn else {}
+                if db_conn and db_conn.resource_id:
+                    conn_metadata["resource_id"] = db_conn.resource_id
+                    conn_metadata["resource_name"] = db_conn.resource_name
+
                 conn_info = ConnectionInfo(
                     provider=adapter.provider,
                     account_id=db_conn.provider_account_id if db_conn else None,
                     scopes=[str(s) for s in (db_conn.scopes or [])] if db_conn else [],
                     connected_at=db_conn.connected_at if db_conn else None,
-                    metadata=dict(db_conn.provider_metadata or {}) if db_conn else {},
+                    metadata=conn_metadata,
                 )
 
                 # Resolve token securely
                 access_token, token_err = await self._resolve_access_token(db_conn, adapter.provider)
 
+                # Graceful degradation if integration is connected but no resource is selected
+                NO_RESOURCE_REQUIRED = {"cmp", "meta"}
+                if db_conn and access_token and not db_conn.resource_id and integration.lower() not in NO_RESOURCE_REQUIRED and not is_demo:
+                    logger.info("integration_no_resource_degrading", provider=adapter.provider)
+                    now = datetime.now(timezone.utc)
+                    degraded_evidence = [
+                        EvidenceItem(
+                            obligation_id=obl_code,
+                            verdict=Verdict.CANNOT_DETERMINE,
+                            confidence=Confidence.LOW,
+                            source=f"{adapter.id}:no_resource",
+                            observed_at=now,
+                            detail="Integration is connected but no assessment resource has been selected.",
+                        )
+                        for obl_code in adapter.obligations_answered
+                    ]
+                    evidence_by_source[adapter.id] = degraded_evidence
+                    run.evidence_count = len(degraded_evidence)
+                    run.status = RunStatus.COMPLETED
+                    run.failure_reason = "No assessment resource selected; degraded to Cannot Determine"
+                    run.completed_at = datetime.now(timezone.utc)
+
+                    for item in degraded_evidence:
+                        ev = Evidence(
+                            client_id=self.client_id,
+                            assessment_id=assessment.id,
+                            verdict=item.verdict,
+                            confidence=item.confidence,
+                            source=item.source,
+                            observed_at=item.observed_at,
+                            detail=item.detail,
+                            sanitized_metadata=item.raw_metadata,
+                            structured_detail=item.structured_detail.model_dump(mode="json") if getattr(item, 'structured_detail', None) else None,
+                        )
+                        all_db_evidence.append((ev, item.obligation_id))
+                    continue
+
                 # Graceful degradation if integration is not connected and not in demo mode
-                if (not db_conn or not access_token) and not settings.demo_mode:
+                if (not db_conn or not access_token) and not is_demo:
                     logger.info("integration_not_connected_degrading", provider=adapter.provider)
                     now = datetime.now(timezone.utc)
                     degraded_evidence = [
@@ -314,6 +377,7 @@ class AssessmentService:
                             observed_at=item.observed_at,
                             detail=item.detail,
                             sanitized_metadata=item.raw_metadata,
+                            structured_detail=item.structured_detail.model_dump(mode="json") if getattr(item, 'structured_detail', None) else None,
                         )
                         all_db_evidence.append((ev, item.obligation_id))
                     continue
@@ -326,16 +390,22 @@ class AssessmentService:
                 }
 
                 # Google Ads customer ID from config or connection
-                ad_account = (
-                    (data.config.ad_accounts and data.config.ad_accounts[0])
-                    or (db_conn and db_conn.resource_id)
-                )
-                if ad_account:
-                    kwargs["ad_account_id"] = ad_account
+                if integration.lower() == "google_ads":
+                    ad_account = (
+                        (data.config.ad_accounts and data.config.ad_accounts[0])
+                        or (db_conn and db_conn.resource_id)
+                    )
+                    if ad_account:
+                        kwargs["customer_id"] = ad_account
 
                 # Meta ad account from config or connection
-                if integration.lower() == "meta" and data.config.ad_accounts:
-                    kwargs["ad_account_id"] = data.config.ad_accounts[0]
+                if integration.lower() == "meta":
+                    ad_account = (
+                        (data.config.ad_accounts and data.config.ad_accounts[0])
+                        or (db_conn and db_conn.resource_id)
+                    )
+                    if ad_account:
+                        kwargs["ad_account_id"] = ad_account
 
                 # GitHub repositories
                 if integration.lower() == "github":
@@ -347,8 +417,8 @@ class AssessmentService:
                     )
                     repos = (
                         data.config.github_repos
-                        or data.config.repositories
                         or ([repo_from_conn] if repo_from_conn else [])
+                        or data.config.repositories
                     )
                     if repos:
                         kwargs["repositories"] = repos
@@ -371,12 +441,13 @@ class AssessmentService:
                                 )
 
                 # Search Console property URL
-                sc_prop = (
-                    (data.config.properties and data.config.properties[0])
-                    or (db_conn and db_conn.resource_id)
-                )
-                if sc_prop:
-                    kwargs["property_url"] = sc_prop
+                if integration.lower() in ("search_console", "google_search_console"):
+                    sc_prop = (
+                        (data.config.properties and data.config.properties[0])
+                        or (db_conn and db_conn.resource_id)
+                    )
+                    if sc_prop:
+                        kwargs["property_url"] = sc_prop
 
                 # Execute collection via adapter
                 result = await adapter.collect(conn_info, audit_callback=make_audit_callback(self.session, self.client_id), **kwargs)
@@ -394,6 +465,7 @@ class AssessmentService:
                         observed_at=item.observed_at,
                         detail=item.detail,
                         sanitized_metadata=item.raw_metadata,
+                        structured_detail=item.structured_detail.model_dump(mode="json") if item.structured_detail else None,
                     )
                     all_db_evidence.append((ev, item.obligation_id))
 
@@ -407,9 +479,40 @@ class AssessmentService:
                 run.status = RunStatus.FAILED
                 run.failure_reason = str(e)
                 run.completed_at = datetime.now(timezone.utc)
+                
+                # Graceful degradation on adapter failure
+                now = datetime.now(timezone.utc)
+                degraded_evidence = [
+                    EvidenceItem(
+                        obligation_id=obl_code,
+                        verdict=Verdict.CANNOT_DETERMINE,
+                        confidence=Confidence.LOW,
+                        source=f"{adapter.id}:error",
+                        observed_at=now,
+                        detail=f"Failed to collect evidence from provider: {e}",
+                    )
+                    for obl_code in adapter.obligations_answered
+                ]
+                if adapter.id not in evidence_by_source:
+                    evidence_by_source[adapter.id] = []
+                evidence_by_source[adapter.id].extend(degraded_evidence)
+                
+                for item in degraded_evidence:
+                    ev = Evidence(
+                        client_id=self.client_id,
+                        assessment_id=assessment.id,
+                        verdict=item.verdict,
+                        confidence=item.confidence,
+                        source=item.source,
+                        observed_at=item.observed_at,
+                        detail=item.detail,
+                        sanitized_metadata=item.raw_metadata,
+                        structured_detail=item.structured_detail.model_dump(mode="json") if getattr(item, 'structured_detail', None) else None,
+                    )
+                    all_db_evidence.append((ev, item.obligation_id))
 
         # Ingest Phase 1 scanner evidence for cross-source reconciliation
-        if "phase1_scanner" not in evidence_by_source:
+        if "phase1_scanner" not in evidence_by_source and is_demo:
             from app.integrations.fixtures import FIXTURES_BY_INTEGRATION
             p1_items = FIXTURES_BY_INTEGRATION.get("phase1_scanner", [])
             evidence_by_source["phase1_scanner"] = p1_items
@@ -423,56 +526,78 @@ class AssessmentService:
                     observed_at=item.observed_at,
                     detail=item.detail,
                     sanitized_metadata=item.raw_metadata,
+                    structured_detail=item.structured_detail.model_dump(mode="json") if item.structured_detail else None,
                 )
                 all_db_evidence.append((ev, item.obligation_id))
 
         # Ingest declared assessment scope as scope_sheet evidence for cross-source reconciliation
         now_ts = datetime.now(timezone.utc)
         scope_evidence: list[EvidenceItem] = []
-        declared_props = list(set(
-            (data.config.properties or []) + (data.config.domains or []) + (data.config.declared_properties or [])
-        ))
-        if declared_props:
+        # Map legacy fields into DeclaredScope if they exist but scope fields are empty
+        scope = data.config.scope
+        
+        # properties
+        all_props = list(set(scope.search_console_properties + scope.analytics_properties + scope.domains + scope.subdomains + data.config.properties + data.config.domains + (data.config.declared_properties or [])))
+        if all_props:
+            scope.search_console_properties = list(set(scope.search_console_properties + all_props))
+            
+        # platforms
+        all_platforms = list(set(scope.marketing_platforms + scope.cmp_platforms + data.config.platforms + data.config.integrations))
+        if all_platforms:
+            scope.marketing_platforms = list(set(scope.marketing_platforms + all_platforms))
+            
+        # ad accounts
+        all_ad_accounts = list(set(scope.google_ads_accounts + data.config.ad_accounts))
+        if all_ad_accounts:
+            scope.google_ads_accounts = list(set(scope.google_ads_accounts + all_ad_accounts))
+            
+        # repositories
+        all_repos = list(set(scope.repositories + data.config.github_repos + data.config.repositories))
+        if all_repos:
+            scope.repositories = list(set(scope.repositories + all_repos))
+
+        if scope.search_console_properties:
             scope_evidence.append(EvidenceItem(
                 obligation_id="S10.scope.properties",
                 verdict=Verdict.OBSERVED,
                 confidence=Confidence.HIGH,
-                source="scope_sheet:properties",
+                source="scope_sheet:search_console_properties",
                 observed_at=now_ts,
-                detail=f"Declared properties in scope: {', '.join(declared_props)}",
-                raw_metadata={"properties": declared_props},
+                detail=f"Declared properties in scope: {', '.join(scope.search_console_properties)}",
+                raw_metadata={"search_console_properties": scope.search_console_properties},
             ))
-        declared_platforms = list(set((data.config.platforms or []) + data.config.integrations))
-        if declared_platforms:
+            
+        if scope.marketing_platforms:
             scope_evidence.append(EvidenceItem(
                 obligation_id="S10.scope.platforms",
                 verdict=Verdict.OBSERVED,
                 confidence=Confidence.HIGH,
-                source="scope_sheet:platforms",
+                source="scope_sheet:marketing_platforms",
                 observed_at=now_ts,
-                detail=f"Declared platforms in scope: {', '.join(declared_platforms)}",
-                raw_metadata={"platforms": declared_platforms},
+                detail=f"Declared marketing platforms in scope: {', '.join(scope.marketing_platforms)}",
+                raw_metadata={"marketing_platforms": scope.marketing_platforms},
             ))
-        if data.config.ad_accounts:
+            
+        if scope.google_ads_accounts:
             scope_evidence.append(EvidenceItem(
                 obligation_id="S9.sharing.documented",
                 verdict=Verdict.OBSERVED,
                 confidence=Confidence.HIGH,
-                source="scope_sheet:ad_accounts",
+                source="scope_sheet:google_ads_accounts",
                 observed_at=now_ts,
-                detail=f"Declared ad accounts in scope: {', '.join(data.config.ad_accounts)}",
-                raw_metadata={"ad_accounts": data.config.ad_accounts},
+                detail=f"Declared ad accounts in scope: {', '.join(scope.google_ads_accounts)}",
+                raw_metadata={"google_ads_accounts": scope.google_ads_accounts},
             ))
-        declared_repos = list(set((data.config.github_repos or []) + (data.config.repositories or [])))
-        if declared_repos:
+            
+        if scope.repositories:
             scope_evidence.append(EvidenceItem(
                 obligation_id="S10.scope.sdks",
                 verdict=Verdict.OBSERVED,
                 confidence=Confidence.HIGH,
                 source="scope_sheet:repositories",
                 observed_at=now_ts,
-                detail=f"Declared repositories in scope: {', '.join(declared_repos)}",
-                raw_metadata={"repositories": declared_repos},
+                detail=f"Declared repositories in scope: {', '.join(scope.repositories)}",
+                raw_metadata={"repositories": scope.repositories},
             ))
         evidence_by_source["scope_sheet"] = scope_evidence
 

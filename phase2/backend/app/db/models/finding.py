@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import Boolean, CheckConstraint, Enum, ForeignKey, Index, Text
+from sqlalchemy import Boolean, CheckConstraint, Enum, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -68,6 +68,7 @@ class Finding(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
     )
     detail: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[FindingStatus] = mapped_column(
         Enum(FindingStatus, name="finding_status"),
         default=FindingStatus.OPEN,
@@ -76,10 +77,16 @@ class Finding(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     human_review_required: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
+    recommended_action: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Source evidence references
     evidence_ids: Mapped[list | None] = mapped_column(JSON)
     sources: Mapped[list | None] = mapped_column(JSON)
+    evidence_details: Mapped[list | None] = mapped_column(JSON)
+
+    # Obligation snapshot — frozen at finding creation time
+    obligation_code: Mapped[str | None] = mapped_column(String(50))
+    obligation_version: Mapped[str | None] = mapped_column(String(50))
 
     # Relationships
     assessment = relationship("Assessment", back_populates="findings")

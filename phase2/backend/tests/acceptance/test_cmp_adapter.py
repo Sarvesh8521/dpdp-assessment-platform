@@ -52,7 +52,8 @@ async def test_other_providers_graceful_health_check(connection):
     
     assert c_res.healthy is False
     assert s_res.healthy is False
-    assert "awaiting API access configuration" in c_res.message
+    assert "unsupported for automated metadata extraction" in c_res.message
+    assert "unsupported for automated metadata extraction" in s_res.message
 
 @pytest.mark.asyncio
 @patch("app.integrations.cmp.adapter.AuditedHTTPClient")
@@ -109,4 +110,58 @@ async def test_other_providers_collect(connection):
     result = await cookie_adapter.collect(connection)
     assert len(result.evidence) == 1
     assert result.evidence[0].verdict == Verdict.CANNOT_DETERMINE
-    assert "awaiting API access" in result.evidence[0].detail
+    assert "CookieYes API is not currently supported" in result.evidence[0].detail
+
+    sec_adapter = SecuritiAdapter()
+    s_result = await sec_adapter.collect(connection)
+    assert len(s_result.evidence) == 1
+    assert s_result.evidence[0].verdict == Verdict.CANNOT_DETERMINE
+    assert "Securiti API is not currently supported" in s_result.evidence[0].detail
+
+@pytest.mark.asyncio
+async def test_forbidden_endpoints_rejection():
+    from app.integrations.base.http_client import AuditedHTTPClient
+    adapter = OneTrustAdapter()
+    
+    # Assert critical endpoints are in the forbidden list
+    assert "consent-receipts$" in adapter.forbidden_endpoints
+    assert "consent-records" in adapter.forbidden_endpoints
+    
+    client = AuditedHTTPClient(
+        provider="onetrust",
+        base_url="https://api.onetrust.com",
+        access_token="test",
+        forbidden_endpoints=adapter.forbidden_endpoints,
+        obligations_served=[]
+    )
+    
+    from app.integrations.base.http_client import ForbiddenEndpointError
+    
+    try:
+        # The AuditedHTTPClient should raise a ForbiddenEndpointError when attempting to access a forbidden endpoint
+        with pytest.raises(ForbiddenEndpointError, match="Attempted to call forbidden endpoint"):
+            await client.get("/api/v1/consent-receipts", operation="read_receipts")
+            
+        with pytest.raises(ForbiddenEndpointError, match="Attempted to call forbidden endpoint"):
+            await client.get("/api/v1/consent-records?user=123", operation="read_records")
+            
+        with pytest.raises(ForbiddenEndpointError, match="Attempted to call forbidden endpoint"):
+            await client.get("/api/individual-consent/456", operation="read_individual")
+            
+        # Prove schema IS allowed
+        schema_called = False
+        async def mock_execute(*args, **kwargs):
+            nonlocal schema_called
+            schema_called = True
+            from unittest.mock import MagicMock
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = {}
+            return mock_resp
+            
+        with patch.object(client, '_execute_with_retry', new=mock_execute):
+            await client.get("/api/v1/consent-receipts/schema", operation="read_schema")
+            assert schema_called is True
+
+    finally:
+        await client.close()

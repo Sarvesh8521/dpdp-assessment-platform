@@ -58,10 +58,13 @@ class Obligation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     dpdp_section: Mapped[str | None] = mapped_column(String(50))
+    version: Mapped[str] = mapped_column(String(50), default="draft", nullable=False)
+    source_reference: Mapped[str | None] = mapped_column(String(500))
     metadata_info: Mapped[dict | None] = mapped_column(JSON)
 
     __table_args__ = (
         Index("ix_obligations_code", "code", unique=True),
         Index("ix_obligations_category", "category"),
         Index("ix_obligations_active", "active"),
+        Index("ix_obligations_version", "version"),
     )

@@ -25,6 +25,7 @@ from app.db.models.obligation import Obligation
 from app.db.models.reconciliation_result import ReconciliationResult
 from app.db.models.report import Report, ReportStatus
 from app.domain.obligations import OBLIGATION_INTEGRATION_MAP
+from app.services.pdf_renderer import PDFReportRenderer
 
 logger = get_logger(__name__)
 
@@ -75,13 +76,21 @@ class ReportGeneratorService:
 
         # 2. Fetch findings
         findings_result = await self.session.execute(
-            select(Finding).where(Finding.assessment_id == assessment_id)
+            select(Finding).where(
+                Finding.assessment_id == assessment_id,
+                Finding.client_id == self.client_id
+            )
         )
         findings = findings_result.scalars().all()
 
         # 3. Fetch reconciliations
         recon_result = await self.session.execute(
-            select(ReconciliationResult).where(ReconciliationResult.assessment_id == assessment_id)
+            select(ReconciliationResult)
+            .join(Assessment, Assessment.id == ReconciliationResult.assessment_id)
+            .where(
+                ReconciliationResult.assessment_id == assessment_id,
+                Assessment.client_id == self.client_id
+            )
         )
         reconciliations = recon_result.scalars().all()
 
@@ -98,13 +107,29 @@ class ReportGeneratorService:
         )
         connections = conn_result.scalars().all()
         conn_map: dict[str, dict[str, Any]] = {}
+        
+        # Fallback from assessment config if available
+        config_data = assessment.configuration or {}
+        ad_accounts = config_data.get("ad_accounts", [])
+        
         for c in connections:
             norm_k = normalize_integration_key(c.provider)
+            
+            # Fallback from assessment config for Meta or Google Ads if resource_id is None
+            res_id = c.resource_id
+            if not res_id and norm_k in ("meta", "google_ads") and ad_accounts:
+                res_id = ad_accounts[0]
+            
+            # Determine resource_name with explicit fallback
+            res_name = c.resource_name or res_id
+            has_resource = bool(res_id)
+            
             conn_map[norm_k] = {
                 "provider": c.provider,
                 "provider_account_id": c.provider_account_id,
-                "resource_id": c.resource_id,
-                "resource_name": c.resource_name,
+                "resource_id": res_id if has_resource else "(not selected)",
+                "resource_name": res_name if has_resource else "(not selected)",
+                "resource_selected": has_resource,
                 "connected_at": c.connected_at.isoformat() if c.connected_at else None,
                 "scopes": c.scopes or [],
             }
@@ -125,8 +150,57 @@ class ReportGeneratorService:
                 "severity": f.severity.value if hasattr(f.severity, "value") else str(f.severity),
                 "human_review_required": f.human_review_required,
                 "detail": f.detail,
+                "reason": f.reason,
+                "compliance_implication": obl.description if obl and obl.description else "Pending legal review to determine compliance implications.",
+                "recommended_action": getattr(f, "recommended_action", None),
                 "sources": f.sources or [],
+                "evidence_details": f.evidence_details or [],
             })
+
+        configured_ints = [normalize_integration_key(i) for i in (assessment.selected_integrations or [])]
+
+        expected_obls = set()
+        for obl_code, mapped_ints in OBLIGATION_INTEGRATION_MAP.items():
+            for m_int in mapped_ints:
+                if normalize_integration_key(m_int) in configured_ints:
+                    expected_obls.add(obl_code)
+                    break
+                    
+        assessed_obls = {f["obligation_code"] for f in findings_data}
+        
+        for obl in obl_map.values():
+            if obl.code in expected_obls and obl.code not in assessed_obls:
+                missing_ints = [normalize_integration_key(i) for i in OBLIGATION_INTEGRATION_MAP.get(obl.code, []) if normalize_integration_key(i) in configured_ints]
+                source_tags = [f"{m}:unassessed" for m in missing_ints] if missing_ints else ["unassessed"]
+                
+                findings_data.append({
+                    "finding_id": f"synth-{obl.id}",
+                    "obligation_id": str(obl.id),
+                    "obligation_uuid": str(obl.id),
+                    "obligation_code": obl.code,
+                    "obligation_title": obl.title,
+                    "dpdp_section": obl.dpdp_section or "",
+                    "verdict": "Cannot determine",
+                    "confidence": "Low",
+                    "severity": obl.severity.value if hasattr(obl.severity, 'value') else str(obl.severity),
+                    "human_review_required": False,
+                    "detail": "Integration not connected or required data could not be accessed.",
+                    "reason": "Required provider evidence unavailable. Connect the integration or verify resource access to resolve this.",
+                    "compliance_implication": obl.description if obl.description else "Pending legal review to determine compliance implications.",
+                    "recommended_action": "Provide the necessary client authorization and/or resource selection to allow the integration to collect required evidence.",
+                    "sources": source_tags,
+                    "evidence_details": [{
+                        "integration": "unknown" if not missing_ints else missing_ints[0],
+                        "operation": "unassessed",
+                        "resource_type": "Unknown",
+                        "resource_id": "Unknown",
+                        "resource_name": "Unknown",
+                        "observed_state": "Unknown",
+                        "expected_state": "Unknown",
+                        "detail": "Integration not connected or required data could not be accessed.",
+                        "reason": "Required provider evidence unavailable. Connect the integration or verify resource access to resolve this."
+                    }],
+                })
 
         recon_data: list[dict[str, Any]] = []
         for r in reconciliations:
@@ -144,7 +218,6 @@ class ReportGeneratorService:
 
         # 7. Build Individual Integration Reports
         # Determine all relevant integrations (from assessment configuration + findings)
-        configured_ints = [normalize_integration_key(i) for i in (assessment.selected_integrations or [])]
         detected_ints = set(configured_ints)
         for f in findings_data:
             for s in f.get("sources", []):
@@ -159,11 +232,14 @@ class ReportGeneratorService:
 
         for int_key in all_integration_keys:
             # Match findings that belong to this integration
-            int_findings = [
-                f for f in findings_data
-                if int_key in [normalize_integration_key(x) for x in OBLIGATION_INTEGRATION_MAP.get(f["obligation_code"], [])]
-                or any(normalize_integration_key(s.split(":")[0]) == int_key for s in f.get("sources", []))
-            ]
+            int_findings = []
+            for f in findings_data:
+                f_ints = {normalize_integration_key(s.split(":")[0]) for s in f.get("sources", [])}
+                # Exclude findings with multiple integration sources from individual reports
+                if len(f_ints) > 1:
+                    continue
+                if int_key in f_ints:
+                    int_findings.append(f)
 
             int_title = INTEGRATION_TITLES.get(int_key, int_key.replace("_", " ").title())
             report_title = f"{int_title} Assessment Report"
@@ -172,8 +248,8 @@ class ReportGeneratorService:
             int_med = len([f for f in int_findings if f.get("severity", "").lower() == "medium"])
             int_low = len([f for f in int_findings if f.get("severity", "").lower() == "low"])
             int_obs = len([f for f in int_findings if f.get("verdict", "").lower() == "observed"])
-            int_not_obs = len([f for f in int_findings if f.get("verdict", "").lower() == "not_observed" or f.get("verdict", "") == "Not observed"])
-            int_cannot = len([f for f in int_findings if f.get("verdict", "").lower() == "cannot_determine" or f.get("verdict", "") == "Cannot determine"])
+            int_not_obs = len([f for f in int_findings if f.get("verdict", "").lower() in ("not_observed", "not observed")])
+            int_cannot = len([f for f in int_findings if f.get("verdict", "").lower() in ("cannot_determine", "cannot determine")])
             int_review = len([f for f in int_findings if f.get("human_review_required")])
 
             individual_reports[int_key] = {
@@ -201,17 +277,19 @@ class ReportGeneratorService:
                     "requires_human_review": int_review,
                 },
                 "findings": int_findings,
+                "issues": [f for f in int_findings if str(f.get("verdict", "")).lower() == "observed"],
+                "evaluated_obligations": [f for f in int_findings if str(f.get("verdict", "")).lower() != "observed"],
             }
 
         # 8. Overall Summary Statistics
-        total_findings = len(findings)
-        high_sev = len([f for f in findings if (getattr(f.severity, "value", str(f.severity))).lower() == "high"])
-        medium_sev = len([f for f in findings if (getattr(f.severity, "value", str(f.severity))).lower() == "medium"])
-        low_sev = len([f for f in findings if (getattr(f.severity, "value", str(f.severity))).lower() == "low"])
-        requires_review = len([f for f in findings if f.human_review_required])
-        observed_count = len([f for f in findings if (getattr(f.verdict, "value", str(f.verdict))).lower() == "observed"])
-        not_observed_count = len([f for f in findings if (getattr(f.verdict, "value", str(f.verdict))).lower() in ("not_observed", "not observed")])
-        cannot_determine_count = len([f for f in findings if (getattr(f.verdict, "value", str(f.verdict))).lower() in ("cannot_determine", "cannot determine")])
+        total_findings = len(findings_data)
+        high_sev = len([f for f in findings_data if str(f.get("severity", "")).lower() == "high"])
+        medium_sev = len([f for f in findings_data if str(f.get("severity", "")).lower() == "medium"])
+        low_sev = len([f for f in findings_data if str(f.get("severity", "")).lower() == "low"])
+        requires_review = len([f for f in findings_data if f.get("human_review_required")])
+        observed_count = len([f for f in findings_data if str(f.get("verdict", "")).lower() == "observed"])
+        not_observed_count = len([f for f in findings_data if str(f.get("verdict", "")).lower() in ("not_observed", "not observed")])
+        cannot_determine_count = len([f for f in findings_data if str(f.get("verdict", "")).lower() in ("cannot_determine", "cannot determine")])
 
         overall_summary = {
             "total_findings": total_findings,
@@ -275,9 +353,23 @@ class ReportGeneratorService:
 
         artifact_ref = str(report_file)
 
-        # 12. Create or update report record
+        # 12. Render PDF Report
+        pdf_file = reports_dir / f"{assessment_id}.pdf"
+        pdf_renderer = PDFReportRenderer()
+        
+        # Add connections to report_data for the PDF
+        report_data["connections"] = conn_map
+        pdf_renderer.generate(report_data, str(pdf_file))
+
+        # 13. Create or update report record for JSON
         existing_report_res = await self.session.execute(
-            select(Report).where(Report.assessment_id == assessment_id)
+            select(Report)
+            .join(Assessment, Assessment.id == Report.assessment_id)
+            .where(
+                Report.assessment_id == assessment_id,
+                Report.format == "json",
+                Assessment.client_id == self.client_id
+            )
         )
         report = existing_report_res.scalar_one_or_none()
         if report:
@@ -290,8 +382,34 @@ class ReportGeneratorService:
                 version=1,
                 status=ReportStatus.COMPLETED,
                 artifact_ref=artifact_ref,
+                format="json"
             )
             self.session.add(report)
+
+        # 14. Create or update report record for PDF
+        existing_pdf_res = await self.session.execute(
+            select(Report)
+            .join(Assessment, Assessment.id == Report.assessment_id)
+            .where(
+                Report.assessment_id == assessment_id,
+                Report.format == "pdf",
+                Assessment.client_id == self.client_id
+            )
+        )
+        pdf_report = existing_pdf_res.scalar_one_or_none()
+        if pdf_report:
+            pdf_report.status = ReportStatus.COMPLETED
+            pdf_report.artifact_ref = str(pdf_file)
+            pdf_report.version += 1
+        else:
+            pdf_report = Report(
+                assessment_id=assessment_id,
+                version=1,
+                status=ReportStatus.COMPLETED,
+                artifact_ref=str(pdf_file),
+                format="pdf"
+            )
+            self.session.add(pdf_report)
 
         assessment.status = AssessmentStatus.COMPLETED
         await self.session.commit()

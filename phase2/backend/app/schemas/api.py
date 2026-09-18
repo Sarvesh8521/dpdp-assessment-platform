@@ -112,8 +112,6 @@ class ConnectionResponse(BaseModel):
     provider_metadata: dict[str, Any] | None = None
     resource_id: str | None = None
     resource_name: str | None = None
-    account_email: str | None = None
-    account_name: str | None = None
 
 
 class ConnectRequest(BaseModel):
@@ -126,8 +124,6 @@ class ConnectRequest(BaseModel):
     oauth_code: str | None = None  # Used for CMP API key
     resource: dict[str, Any] | None = None  # { id, customer_id, site_id, ... }
     provider_name: str | None = None  # For CMP sub-providers (onetrust, cookieyes, securiti)
-    account_email: str | None = None
-    account_name: str | None = None
 
 
 class OAuthInitResponse(BaseModel):
@@ -155,10 +151,12 @@ class IntegrationStatusItem(BaseModel):
     provider: str
     status: str  # not_connected, connecting, connected, error
     connection_id: str | None = None
-    account_email: str | None = None
-    account_name: str | None = None
     resource_id: str | None = None
     resource_name: str | None = None
+    resource_selected: bool = False
+    requires_resource_selection: bool = True
+    account_email: str | None = None
+    account_name: str | None = None
     connected_at: datetime | None = None
     error: str | None = None
 
@@ -170,8 +168,21 @@ class IntegrationStatusResponse(BaseModel):
 
 # ── Assessment Schemas ──
 
+class DeclaredScope(BaseModel):
+    domains: list[str] = Field(default_factory=list)
+    subdomains: list[str] = Field(default_factory=list)
+    analytics_properties: list[str] = Field(default_factory=list)
+    search_console_properties: list[str] = Field(default_factory=list)
+    google_ads_accounts: list[str] = Field(default_factory=list)
+    marketing_platforms: list[str] = Field(default_factory=list)
+    repositories: list[str] = Field(default_factory=list)
+    mobile_applications: list[str] = Field(default_factory=list)
+    cmp_platforms: list[str] = Field(default_factory=list)
+
 class AssessmentConfig(BaseModel):
     integrations: list[str]
+    scope: DeclaredScope = Field(default_factory=DeclaredScope)
+    # Legacy flat fields for backward compatibility with frontend
     domains: list[str] = Field(default_factory=list)
     properties: list[str] = Field(default_factory=list)
     platforms: list[str] = Field(default_factory=list)
@@ -181,6 +192,7 @@ class AssessmentConfig(BaseModel):
     mobile_apps: list[str] = Field(default_factory=list)
     declared_properties: list[str] | None = None
     cmp_provider: str | None = None
+    is_demo: bool = False
 
 
 class AssessmentCreate(BaseModel):
@@ -225,7 +237,9 @@ class FindingResponse(BaseModel):
     detail: str
     status: str
     human_review_required: bool
+    recommended_action: str | None = None
     sources: list[str] | None = None
+    evidence_details: list[dict] | None = None
     created_at: datetime
 
 

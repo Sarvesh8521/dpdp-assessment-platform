@@ -3,9 +3,26 @@
 Central obligation register — the spine of the platform.
 NOTE: This is a draft mapping pending legal review.
 TODO(legal-review): Validate all obligations against final DPDP rules.
+
+To replace with the counsel-reviewed register:
+1. Update REGISTER_VERSION to the counsel-supplied version string.
+2. Replace OBLIGATIONS list entries with counsel-reviewed content.
+3. Add source_reference to each entry (e.g. "DPDP Act 2023, Section 4(1)").
+4. Run: python -m app.cli.seed_obligations
 """
 
 from __future__ import annotations
+
+# Version of the obligation register. Updated when counsel provides the final reviewed register.
+REGISTER_VERSION = "draft-2026-08"
+
+# Valid categories and severities for structural validation
+_VALID_CATEGORIES = {
+    "consent", "data_collection", "data_retention", "data_sharing",
+    "data_processing", "transparency", "rights", "security",
+    "governance", "cross_border",
+}
+_VALID_SEVERITIES = {"high", "medium", "low"}
 
 OBLIGATIONS = [
     # ── Section 4: Consent & Notice ──
@@ -16,6 +33,7 @@ OBLIGATIONS = [
         "category": "consent",
         "severity": "high",
         "dpdp_section": "S4",
+        "source_reference": None,  # Pending counsel review
     },
     {
         "code": "S4.consent.informed",
@@ -24,6 +42,7 @@ OBLIGATIONS = [
         "category": "consent",
         "severity": "high",
         "dpdp_section": "S4",
+        "source_reference": None,
     },
     {
         "code": "S4.consent.granular",
@@ -32,6 +51,7 @@ OBLIGATIONS = [
         "category": "consent",
         "severity": "high",
         "dpdp_section": "S4",
+        "source_reference": None,
     },
     {
         "code": "S4.consent.withdrawal",
@@ -40,6 +60,7 @@ OBLIGATIONS = [
         "category": "consent",
         "severity": "high",
         "dpdp_section": "S4",
+        "source_reference": None,
     },
 
     # ── Section 5: Notice Requirements ──
@@ -398,3 +419,38 @@ def get_obligations_for_integration(integration_id: str) -> list[str]:
 def validate_obligation_code(code: str) -> bool:
     """Validate that an obligation code exists in the register."""
     return any(o["code"] == code for o in OBLIGATIONS)
+
+
+def validate_obligation_register(register: list[dict] | None = None) -> list[str]:
+    """Validate structural integrity of the obligation register.
+
+    Returns a list of error messages. Empty list means valid.
+    """
+    entries = register if register is not None else OBLIGATIONS
+    errors: list[str] = []
+    seen_codes: set[str] = set()
+
+    required_keys = {"code", "title", "category", "severity"}
+
+    for i, entry in enumerate(entries):
+        missing = required_keys - set(entry.keys())
+        if missing:
+            errors.append(f"Entry {i}: missing required keys: {missing}")
+            continue
+
+        code = entry["code"]
+        if not isinstance(code, str) or not code.strip():
+            errors.append(f"Entry {i}: 'code' must be a non-empty string")
+            continue
+
+        if code in seen_codes:
+            errors.append(f"Entry {i}: duplicate code '{code}'")
+        seen_codes.add(code)
+
+        if entry["category"] not in _VALID_CATEGORIES:
+            errors.append(f"Entry {i} ({code}): invalid category '{entry['category']}'")
+
+        if entry["severity"] not in _VALID_SEVERITIES:
+            errors.append(f"Entry {i} ({code}): invalid severity '{entry['severity']}'")
+
+    return errors

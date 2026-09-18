@@ -1,1 +1,1 @@
-{"client_id": "89255f7d-53ad-491f-8299-c32961bab648", "secret_name": "search_console_oauth_token", "secret_ref": "4a5568b6-471e-41f4-a27f-e5bed8bc6ccd", "revoked": false}
+{"client_id": "89255f7d-53ad-491f-8299-c32961bab648", "secret_name": "search_console_oauth_token", "secret_ref": "4a5568b6-471e-41f4-a27f-e5bed8bc6ccd", "revoked": true}

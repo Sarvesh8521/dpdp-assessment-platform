@@ -1,19 +1,21 @@
 import pytest
 import uuid
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.integrations.base.http_client import AuditedHTTPClient, ExternalAPIError
 from app.api.v1.integrations import make_audit_callback
 
 @pytest.mark.asyncio
-async def test_audited_http_client_logs_to_db():
+@patch("app.api.v1.integrations.async_session_factory")
+async def test_audited_http_client_logs_to_db(mock_async_session_factory):
     """Verify that using AuditedHTTPClient with make_audit_callback actually writes to the db."""
     mock_session = AsyncMock()
     mock_session.add = MagicMock()
+    mock_async_session_factory.return_value.__aenter__.return_value = mock_session
     
     test_client_id = uuid.uuid4()
-    audit_cb = make_audit_callback(mock_session, client_id=test_client_id)
+    audit_cb = make_audit_callback(session=mock_session, client_id=test_client_id)
     
     # Use a dummy provider but hit github API which is in ALLOWED_HOSTS
     async with AuditedHTTPClient(provider="dummy", access_token="fake_token", audit_callback=audit_cb) as client:

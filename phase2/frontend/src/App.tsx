@@ -35,6 +35,8 @@ type IntegrationState = {
   accountName?: string;
   resourceId?: string;
   resourceName?: string;
+  resourceSelected?: boolean;
+  requiresResourceSelection?: boolean;
   tempTokenRef?: string;
   resources?: { id: string; name: string; metadata?: any }[];
   error?: string;
@@ -76,6 +78,12 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [findings, setFindings] = useState<any[]>([]);
+  
+  /* ─── Human Review Override State ─── */
+  const [overrideModalOpen, setOverrideModalOpen] = useState(false);
+  const [overrideFinding, setOverrideFinding] = useState<any>(null);
+  const [overrideVerdict, setOverrideVerdict] = useState<string>('Observed');
+  const [overrideReason, setOverrideReason] = useState<string>('');
 
   /* ─── Integration Connections State ─── */
   const [connections, setConnections] = useState<Record<string, any>>({});
@@ -236,10 +244,12 @@ function App() {
             accountName: item.account_name,
             resourceId: item.resource_id,
             resourceName: item.resource_name,
+            resourceSelected: item.resource_selected ?? false,
+            requiresResourceSelection: item.requires_resource_selection ?? true,
             error: item.error,
           };
           // If connected but no resource selected, fetch resources to display in selector
-          if (item.status === 'connected' && !item.resource_id) {
+          if (item.status === 'connected' && !item.resource_selected) {
             fetchResourcesForProvider(item.provider, authToken, cid);
           }
         }
@@ -559,6 +569,37 @@ function App() {
     } catch (err) {}
   };
 
+  const submitOverride = async () => {
+    if (!overrideFinding || !overrideReason.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE}/findings/${overrideFinding.id}/override`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          new_verdict: overrideVerdict.toUpperCase().replace(' ', '_'),
+          reason: overrideReason
+        })
+      });
+      if (res.ok) {
+        setOverrideModalOpen(false);
+        setOverrideFinding(null);
+        setOverrideReason('');
+        if (assessments.length > 0) {
+          fetchFindings(token!, assessments[0].id);
+          fetchReportData(token!, assessments[0].id);
+        }
+      } else {
+        const error = await res.json();
+        alert(error.detail || 'Failed to submit override');
+      }
+    } catch (err) {
+      alert('Error submitting override');
+    }
+  };
+
   const fetchReportData = async (authToken: string, assessmentId: string) => {
     try {
       const res = await fetch(`${API_BASE}/assessments/${assessmentId}/report/json`, {
@@ -871,12 +912,17 @@ function App() {
             <span className="connected-info-value">{state.accountEmail}</span>
           </div>
         )}
-        {state.resourceName && (
+        {state.resourceName ? (
           <div className="connected-info-row">
             <span className="connected-info-label">Resource:</span>
             <span className="connected-info-value">{state.resourceName}</span>
           </div>
-        )}
+        ) : state.requiresResourceSelection !== false ? (
+          <div className="connected-info-row">
+            <span className="connected-info-label">Resource:</span>
+            <span className="connected-info-value" style={{ color: 'var(--color-warning, #f59e0b)' }}>⚠ Not selected</span>
+          </div>
+        ) : null}
       </div>
       <div className="integration-actions">
         {onChangeResource && (
@@ -2397,10 +2443,32 @@ function App() {
                     </div>
 
                     <div style={{ margin: '0.75rem 0', color: 'var(--text-primary)', lineHeight: 1.6, fontSize: '0.95rem' }}>
-                      {f.detail}
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <h5 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Technical Observation:</h5>
+                        <p style={{ margin: 0 }}>{f.detail}</p>
+                      </div>
+                      
+                      <div style={{ marginBottom: '0.75rem', background: 'rgba(59, 130, 246, 0.05)', padding: '0.5rem', borderRadius: '4px', borderLeft: '2px solid #3b82f6' }}>
+                        <h5 style={{ fontSize: '0.85rem', color: '#60a5fa', marginBottom: '0.25rem' }}>Compliance Implication:</h5>
+                        <p style={{ margin: 0, fontSize: '0.9rem' }}>{f.compliance_implication || 'Pending legal review to determine compliance implications.'}</p>
+                      </div>
                     </div>
 
-                    {f.human_review_required && (
+                    <div
+                      style={{
+                        marginBottom: '0.75rem',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '4px',
+                        background: 'rgba(168, 85, 247, 0.1)',
+                        border: '1px solid rgba(168, 85, 247, 0.3)',
+                        color: '#c084fc',
+                        fontSize: '0.8rem',
+                      }}
+                    >
+                      <span>⚖️ <strong>Legal Review Required:</strong> The current obligation mapping is a draft pending legal review. Technical findings do not automatically constitute a legal violation.</span>
+                    </div>
+
+                    {f.human_review_required && f.status !== 'OVERRIDDEN' && (
                       <div
                         style={{
                           marginBottom: '0.75rem',
@@ -2410,9 +2478,87 @@ function App() {
                           border: '1px solid rgba(245, 158, 11, 0.3)',
                           color: '#fbbf24',
                           fontSize: '0.8rem',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
                         }}
                       >
-                        ⚠️ Human Review Required: Conflicting signals detected between sources.
+                        <span>⚠️ Human Review Required: Conflicting signals detected between sources.</span>
+                        <button 
+                          className="btn btn-secondary" 
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                          onClick={() => {
+                            setOverrideFinding(f);
+                            setOverrideModalOpen(true);
+                          }}
+                        >
+                          Review & Override
+                        </button>
+                      </div>
+                    )}
+
+                    {f.status === 'OVERRIDDEN' && (
+                      <div
+                        style={{
+                          marginBottom: '0.75rem',
+                          padding: '0.5rem 0.75rem',
+                          borderRadius: '4px',
+                          background: 'rgba(16, 185, 129, 0.1)',
+                          border: '1px solid rgba(16, 185, 129, 0.3)',
+                          color: '#10b981',
+                          fontSize: '0.8rem',
+                        }}
+                      >
+                        ✓ Human Reviewed
+                        <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', opacity: 0.8 }}>
+                          Original: <strong>{f.original_verdict}</strong> ➔ New: <strong>{f.verdict}</strong><br/>
+                          Reason: {f.override_reason}
+                        </div>
+                      </div>
+                    )}
+
+                    {f.evidence_details && f.evidence_details.length > 0 && (
+                      <div style={{ marginTop: '1rem', marginBottom: '1rem', borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '1rem' }}>
+                        <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Evidence Trace</h4>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          {f.evidence_details.map((ev: any, evIdx: number) => {
+                            if (ev.source === 'reconciliation') {
+                              return (
+                                <div key={evIdx} style={{ background: 'rgba(0,0,0,0.2)', padding: '0.75rem', borderRadius: '4px', borderLeft: '2px solid var(--primary-color)' }}>
+                                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                                    <strong>Source A:</strong> {ev.metadata?.source_a} | <strong>Source B:</strong> {ev.metadata?.source_b}
+                                  </div>
+                                  <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+                                    <strong>Resource:</strong> Cross-Source Check ({ev.operation})
+                                  </div>
+                                  <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+                                    <strong>Observation:</strong> {ev.detail}
+                                  </div>
+                                  <div style={{ fontSize: '0.8rem', color: '#fbbf24' }}>
+                                    <strong>Result:</strong> {ev.reason || 'reconciliation/contradiction'}
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return (
+                              <div key={evIdx} style={{ background: 'rgba(0,0,0,0.2)', padding: '0.75rem', borderRadius: '4px', borderLeft: '2px solid rgba(255,255,255,0.2)' }}>
+                                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                                  <strong>Source:</strong> {ev.integration || ev.source} {ev.operation ? `(${ev.operation})` : ''}
+                                </div>
+                                <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+                                  <strong>Resource:</strong> {ev.resource_id || ev.resource_name || 'N/A'} {ev.location ? `[${ev.location}]` : ''}
+                                </div>
+                                <div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+                                  <strong>Observation:</strong> {ev.detail}
+                                </div>
+                                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', gap: '1rem' }}>
+                                  <span><strong>Observed:</strong> {ev.observed_state || 'N/A'}</span>
+                                  <span><strong>Expected:</strong> {ev.expected_state || 'N/A'}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
 
@@ -2736,6 +2882,74 @@ function App() {
         {activeTab === 'status' && renderStatusReport()}
         {activeTab === 'assessments' && renderAssessmentHistory()}
       </main>
+
+      {/* Human Review Modal */}
+      {overrideModalOpen && overrideFinding && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+          <div style={{
+            background: 'var(--bg-secondary)', padding: '2rem', borderRadius: 'var(--radius-lg)', width: '500px', maxWidth: '90%'
+          }}>
+            <h2 style={{ marginTop: 0, marginBottom: '1rem', color: 'var(--text-primary)' }}>Override Finding Verdict</h2>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+              You are reviewing a finding that requires human intervention. Please provide the final verdict and a mandatory reason for this change.
+            </p>
+            
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500, color: 'var(--text-primary)' }}>Original Verdict</label>
+              <div style={{ padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', color: 'var(--text-secondary)' }}>
+                {overrideFinding.verdict}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500, color: 'var(--text-primary)' }}>New Verdict</label>
+              <select 
+                className="input-field" 
+                value={overrideVerdict} 
+                onChange={(e) => setOverrideVerdict(e.target.value)}
+              >
+                <option value="Observed">Observed (Compliant)</option>
+                <option value="Not observed">Not observed (Non-compliant)</option>
+                <option value="Cannot determine">Cannot determine</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500, color: 'var(--text-primary)' }}>Reason for Override (Required)</label>
+              <textarea 
+                className="input-field" 
+                rows={3}
+                placeholder="Explain why this verdict is being overridden..."
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+              ></textarea>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => {
+                  setOverrideModalOpen(false);
+                  setOverrideFinding(null);
+                  setOverrideReason('');
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={submitOverride}
+                disabled={!overrideReason.trim() || overrideVerdict.toUpperCase().replace(' ', '_') === overrideFinding.verdict.toUpperCase().replace(' ', '_')}
+              >
+                Submit Override
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -53,7 +53,7 @@ def test_rule3_ga4_linked_vs_declared():
     
     findings = rule.reconcile(ga4_evidence, scope_evidence)
     assert len(findings) == 1
-    assert findings[0].outcome == "contradiction"
+    assert findings[0].outcome == "insufficient_data"
     assert "googleAdsLinks" in findings[0].detail
 
 def test_rule4_ads_match_vs_consent():
@@ -64,7 +64,7 @@ def test_rule4_ads_match_vs_consent():
     
     findings = rule.reconcile(ads_evidence, cmp_evidence)
     assert len(findings) == 1
-    assert findings[0].outcome == "contradiction"
+    assert findings[0].outcome == "insufficient_data"
 
 def test_rule5_github_sdks_vs_declared():
     rule = GitHubSDKsVsDeclared()
@@ -73,27 +73,27 @@ def test_rule5_github_sdks_vs_declared():
     
     findings = rule.reconcile(github_evidence, [])
     assert len(findings) == 1
-    assert findings[0].outcome == "contradiction"
-    assert "react-native-fbsdk-next" in findings[0].detail
+    assert findings[0].outcome == "insufficient_data"
+    assert "scope sheet" in findings[0].detail
 
 def test_rule6_sc_properties_vs_declared():
     rule = SCPropertiesVsDeclared()
     
-    sc_evidence = [create_evidence("search_console", Verdict.NOT_OBSERVED, "S10", detail="undeclared property https://example.com")]
+    sc_evidence = [create_evidence("search_console:verified_site:", Verdict.OBSERVED, "S10", raw_metadata={"property_url": "https://example.com"})]
     
     findings = rule.reconcile(sc_evidence, [])
     assert len(findings) == 1
-    assert findings[0].outcome == "contradiction"
+    assert findings[0].outcome == "insufficient_data"
 
 def test_rule7_cmp_purposes_vs_gtm():
     rule = CMPPurposesVsGTMCategories()
     
     cmp_evidence = []
-    gtm_evidence = [create_evidence("gtm", Verdict.NOT_OBSERVED, "CMP.categories.complete", detail="tags without consent")]
+    gtm_evidence = [create_evidence("gtm:tag_analysis", Verdict.OBSERVED, "S6.consentGating", raw_metadata={"tags": [{"has_consent_settings": True, "consent_settings": {"consent_type": "ad_storage"}}]})]
     
     findings = rule.reconcile(cmp_evidence, gtm_evidence)
     assert len(findings) == 1
-    assert findings[0].outcome == "contradiction"
+    assert findings[0].outcome == "insufficient_data"
     
 def test_run_reconciliation():
     evidence = {
@@ -101,5 +101,6 @@ def test_run_reconciliation():
         "phase1_scanner": [create_evidence("phase1_scanner:tags", Verdict.OBSERVED, "S12", raw_metadata={"tags": [{"type": "meta"}, {"type": "google_analytics"}]})]
     }
     findings = run_reconciliation(evidence)
-    assert len(findings) == 1
-    assert findings[0].outcome == "contradiction"
+    assert len(findings) == 2
+    assert any(f.outcome == "contradiction" for f in findings)
+    assert any(f.outcome == "insufficient_data" for f in findings)

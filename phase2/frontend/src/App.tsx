@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useGoogleLogin } from '@react-oauth/google';
 import './index.css';
 
-const API_BASE = 'http://localhost:8001/api/v1';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api/v1';
 
 const StatCard = ({ title, value, subtitle, type = 'info' }: any) => {
   const badgeClass = `badge badge-${type}`;
@@ -39,6 +39,7 @@ type IntegrationState = {
   requiresResourceSelection?: boolean;
   tempTokenRef?: string;
   resources?: { id: string; name: string; metadata?: any }[];
+  providerMetadata?: any;
   error?: string;
 };
 
@@ -93,12 +94,10 @@ function App() {
   const [adsCustomerId, setAdsCustomerId] = useState('');
   const [cmpKey, setCmpKey] = useState('');
   const [cmpProvider, setCmpProvider] = useState('OneTrust');
-  const [githubRepos] = useState<string[]>([]);
   const [selectedBiz, setSelectedBiz] = useState('');
   const [selectedAdAccount, setSelectedAdAccount] = useState('');
   const [metaAssets, setMetaAssets] = useState<any[]>([]);
   const [selectedRepo, setSelectedRepo] = useState('');
-  const [repoUrl, setRepoUrl] = useState('');
   const [cmpSite, setCmpSite] = useState('');
   const [selectedResource, setSelectedResource] = useState<Record<string, string>>({});
   const [manualInputs, setManualInputs] = useState<Record<string, string>>({});
@@ -246,8 +245,14 @@ function App() {
             resourceName: item.resource_name,
             resourceSelected: item.resource_selected ?? false,
             requiresResourceSelection: item.requires_resource_selection ?? true,
+            providerMetadata: item.provider_metadata,
             error: item.error,
           };
+          
+          if (item.provider === 'meta' && item.provider_metadata?.business_id) {
+            setSelectedBiz(item.provider_metadata.business_id);
+          }
+
           // If connected but no resource selected, fetch resources to display in selector
           if (item.status === 'connected' && !item.resource_selected) {
             fetchResourcesForProvider(item.provider, authToken, cid);
@@ -799,20 +804,40 @@ function App() {
     const state = getIntState(provider);
     try {
       if (['gtm', 'ga4', 'search_console', 'meta', 'github', 'google_ads'].includes(provider) && resource) {
+        const urlParams = new URLSearchParams({
+          client_id: clientId || '',
+          resource_id: resource.id,
+          resource_name: resource.name,
+        });
+        if (state.connectionId) {
+          urlParams.append('connection_id', state.connectionId);
+        }
         const res = await fetch(
-          `${API_BASE}/integrations/connect/${provider}/select-resource?client_id=${clientId}&resource_id=${encodeURIComponent(resource.id)}&resource_name=${encodeURIComponent(resource.name)}`,
+          `${API_BASE}/integrations/connect/${provider}/select-resource?${urlParams.toString()}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: extra ? JSON.stringify({ provider_metadata: extra }) : undefined,
           }
         );
         if (res.ok) {
+          const savedData = await res.json().catch(() => null);
           setIntState(provider, {
             status: 'connected',
-            resourceId: resource.id,
-            resourceName: resource.name,
+            resourceId: savedData?.resource_id || resource.id,
+            resourceName: savedData?.resource_name || resource.name,
+            resourceSelected: true,
+            connectionId: savedData?.connection_id || undefined,
           });
+          // Refresh integration status from backend so persisted value survives refresh
+          if (token && clientId) {
+            loadIntegrationStatuses(token, clientId);
+          }
           return;
+        } else {
+          const err = await res.json().catch(() => null);
+          setIntState(provider, { status: 'error', error: err?.detail || 'Failed to save resource selection' });
+          throw new Error(err?.detail || 'Failed to save resource selection');
         }
       }
 
@@ -1618,7 +1643,8 @@ function App() {
                         className="btn-connect"
                         disabled={!adsCustomerId}
                         onClick={async () => {
-                          await finalizeConnection('google_ads', null, { customer_id: adsCustomerId });
+                          const normalizedId = adsCustomerId.replace(/-/g, '');
+                          await finalizeConnection('google_ads', { id: normalizedId, name: adsCustomerId });
                           setEditingProvider(null);
                         }}
                       >
@@ -1671,7 +1697,7 @@ function App() {
             const manualBiz = manualInputs['meta'] || '';
             const isConnected = state.status === 'connected';
             const isConnectingWithAccount = state.status === 'connecting' && Boolean(state.accountEmail);
-            const effectiveBiz = state.resourceName || state.resourceId || selectedBiz;
+            const effectiveBiz = state.resourceName || state.resourceId;
             const isEditingMeta = editingProvider === 'meta';
 
             return (
@@ -1726,25 +1752,8 @@ function App() {
                           ))}
                         </select>
                         {selectedBiz && metaAssets.length > 0 && (
-                          <div style={{ marginTop: '0.75rem' }}>
-                            <label className="integration-label">Select Ad Account</label>
-                            <select
-                              className="integration-select"
-                              value={selectedAdAccount}
-                              onChange={(e) => setSelectedAdAccount(e.target.value)}
-                            >
-                              <option value="">Select Ad Account...</option>
-                              {metaAssets.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                        {selectedBiz && metaAssets.length === 0 && (
                           <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                            Fetching ad accounts...
+                            Discovered {metaAssets.length} ad accounts. The entire business will be scanned.
                           </div>
                         )}
                       </div>
@@ -1763,18 +1772,19 @@ function App() {
                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                       <button
                         className="btn-connect"
-                        disabled={(!selectedBiz || !selectedAdAccount) && !manualBiz}
+                        disabled={!selectedBiz && !manualBiz}
                         onClick={async () => {
                           const foundBiz = (state.resources || []).find((r) => r.id === selectedBiz);
-                          const foundAsset = metaAssets.find((a) => a.id === selectedAdAccount);
                           let finalRes = null;
-                          if (foundAsset) {
-                            finalRes = { id: foundAsset.id, name: `${foundBiz?.name} - ${foundAsset.name}` };
+                          if (foundBiz) {
+                            finalRes = { id: foundBiz.id, name: foundBiz.name };
                           } else if (manualBiz) {
                             finalRes = { id: manualBiz, name: `Business ${manualBiz}` };
                           }
                           if (finalRes) {
-                            await finalizeConnection('meta', finalRes, { business_id: selectedBiz || undefined });
+                            console.log(`Meta selected business: ${finalRes.id}`);
+                            console.log(`Meta resource selection request:`, { provider: 'meta', resource_id: finalRes.id, resource_name: finalRes.name, extra: { business_id: finalRes.id } });
+                            await finalizeConnection('meta', finalRes, { business_id: finalRes.id });
                             setEditingProvider(null);
                           }
                         }}
@@ -1794,9 +1804,9 @@ function App() {
                     <div className="integration-actions" style={{ marginTop: '0.75rem' }}>
                       <button
                         className="btn-reconnect"
-                        onClick={() => {
-                          handleDisconnect('meta');
-                          handleMetaOAuth();
+                        onClick={async () => {
+                          await handleDisconnect('meta');
+                          await handleMetaOAuth();
                         }}
                       >
                         Reconnect
@@ -1914,7 +1924,6 @@ function App() {
                               value={selectedRepo}
                               onChange={(e) => {
                                 setSelectedRepo(e.target.value);
-                                setRepoUrl('');
                               }}
                               style={{
                                 width: '100%',
@@ -1936,7 +1945,7 @@ function App() {
                           </div>
                         ) : (
                           <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', padding: '0.25rem 0 0.5rem' }}>
-                            No repositories found via GitHub App. You can enter a repo URL below.
+                            No repositories found via GitHub App. Ensure the App is installed with repository access.
                           </div>
                         )
                       ) : (
@@ -1953,87 +1962,20 @@ function App() {
                           </span>
                         </div>
                       )}
-
-                      {/* Divider with "OR" */}
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.75rem',
-                        margin: '0.75rem 0',
-                      }}>
-                        <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }} />
-                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' as const }}>OR</span>
-                        <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }} />
-                      </div>
-
-                      {/* Option 2: Manual URL input */}
-                      <div>
-                        <label className="integration-label" style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          marginBottom: '0.4rem',
-                        }}>
-                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                          </svg>
-                          Enter GitHub Repo URL
-                        </label>
-                        <input
-                          type="text"
-                          className="integration-input"
-                          placeholder="https://github.com/owner/repo"
-                          value={repoUrl}
-                          onChange={(e) => {
-                            setRepoUrl(e.target.value);
-                            if (e.target.value) setSelectedRepo('');
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '0.6rem 0.75rem',
-                            borderRadius: '8px',
-                            border: '1px solid rgba(255,255,255,0.12)',
-                            background: 'rgba(0,0,0,0.2)',
-                            color: 'var(--text-primary)',
-                            fontSize: '0.875rem',
-                            outline: 'none',
-                            transition: 'border-color 0.2s',
-                          }}
-                          onFocus={(e) => { e.target.style.borderColor = 'var(--accent-primary)'; }}
-                          onBlur={(e) => { e.target.style.borderColor = 'rgba(255,255,255,0.12)'; }}
-                        />
-                        <div style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem', marginTop: '0.3rem' }}>
-                          Paste any public GitHub repository URL to scan
-                        </div>
-                      </div>
                     </div>
 
-                    {/* Action buttons */}
+                    {/* Action buttons — only from installation-scoped dropdown */}
                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                       <button
                         className="btn-connect"
-                        disabled={!selectedRepo && !repoUrl.trim()}
+                        disabled={!selectedRepo}
                         onClick={async () => {
-                          let finalRes: { id: string; name: string };
-                          if (selectedRepo) {
-                            const found = (state.resources || []).find((r) => r.id === selectedRepo);
-                            finalRes = found || { id: selectedRepo, name: selectedRepo };
-                          } else {
-                            // Parse repo from URL: https://github.com/owner/repo → owner/repo
-                            const urlStr = repoUrl.trim().replace(/\/+$/, '');
-                            const ghMatch = urlStr.match(/github\.com\/([^/]+\/[^/]+)/);
-                            const repoIdFromUrl = ghMatch ? ghMatch[1] : urlStr;
-                            finalRes = { id: repoIdFromUrl, name: repoIdFromUrl };
-                          }
+                          if (!selectedRepo) return;
+                          const found = (state.resources || []).find((r) => r.id === selectedRepo);
+                          const finalRes = found || { id: selectedRepo, name: selectedRepo };
                           if (finalRes && finalRes.id) {
-                            await finalizeConnection('github', finalRes, {
-                              repository_url: finalRes.id.startsWith('http')
-                                ? finalRes.id
-                                : `https://github.com/${finalRes.id}`,
-                            });
+                            await finalizeConnection('github', finalRes, {});
                             setEditingProvider(null);
-                            setRepoUrl('');
                           }
                         }}
                         style={{

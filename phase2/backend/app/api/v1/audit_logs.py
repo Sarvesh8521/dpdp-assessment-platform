@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.auth.dependencies import AuthContext, get_current_user
+from app.auth.dependencies import AuthContext, get_current_user, apply_client_isolation
 from app.db.session import get_db_session
 from app.db.models.audit_log import AuditLog
 
@@ -24,9 +24,7 @@ async def list_audit_logs(
     """List audit logs (append-only API log)."""
     auth.require_client_access(client_id)
     
-    query = select(AuditLog).where(
-        AuditLog.client_id == client_id
-    ).order_by(AuditLog.timestamp.desc()).limit(limit).offset(offset)
+    query = apply_client_isolation(select(AuditLog).where(AuditLog.client_id == client_id), AuditLog, auth).order_by(AuditLog.timestamp.desc()).limit(limit).offset(offset)
     
     result = await session.execute(query)
     logs = result.scalars().all()

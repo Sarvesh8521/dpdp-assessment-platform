@@ -28,12 +28,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
-from app.auth.dependencies import AuthContext, get_current_user
+from app.auth.dependencies import AuthContext, get_current_user, apply_client_isolation
 from app.core.config import get_settings
 from app.db.session import get_db_session, async_session_factory
 from app.db.models.connection import Connection, ConnectionStatus
@@ -48,6 +48,7 @@ from app.schemas.api import (
     ResourceListResponse,
     IntegrationStatusItem,
     IntegrationStatusResponse,
+    SelectResourcePayload,
 )
 from app.security.secret_manager import get_secret_manager
 from app.integrations.registry import get_adapter
@@ -95,6 +96,34 @@ async def _get_capped_expires_at(session: AsyncSession, client_id: uuid.UUID, to
             return min(token_expiry, client.engagement_end)
         return client.engagement_end
     return token_expiry
+
+async def _require_active_engagement(session: AsyncSession, client_id: uuid.UUID) -> None:
+    """Raise HTTP 403 if the client's engagement period has ended."""
+    client = await session.get(Client, client_id)
+    if client and client.engagement_end and datetime.now(timezone.utc) > client.engagement_end:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot establish new connections: the engagement period has ended."
+        )
+
+async def _enforce_engagement_expiry(session: AsyncSession, connection: Connection) -> bool:
+    """Check if engagement ended. If so, mark expired and revoke secret."""
+    if connection.status == ConnectionStatus.EXPIRED:
+        return True
+    
+    client = await session.get(Client, connection.client_id)
+    if client and client.engagement_end and datetime.now(timezone.utc) > client.engagement_end:
+        connection.status = ConnectionStatus.EXPIRED
+        connection.revoked_at = datetime.now(timezone.utc)
+        if connection.secret_ref:
+            try:
+                secret_manager = get_secret_manager()
+                await secret_manager.revoke_secret(str(connection.client_id), connection.secret_ref)
+            except Exception:
+                pass
+        await session.commit()
+        return True
+    return False
 
 
 # ── Audit Logging Helper ──
@@ -169,6 +198,7 @@ async def google_oauth_init(
     redirect the browser to this URL (full-page redirect, not popup).
     """
     auth.require_client_access(client_id)
+    await _require_active_engagement(session, client_id)
 
     if provider not in GOOGLE_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Provider '{provider}' does not use Google OAuth")
@@ -245,16 +275,16 @@ async def google_oauth_callback(
 
         # 2. Exchange code for tokens
         handler = GoogleOAuthHandler()
-        token_data = await handler.exchange_code(code, audit_callback=make_audit_callback(session, client_id))
+        token_data = await handler.exchange_code(
+            code,
+            audit_callback=make_audit_callback(session, client_id),
+            client_id=str(client_id)
+        )
         logger.info("google_oauth_token_exchange_success", provider=provider)
 
         access_token = token_data.get("access_token")
         if not access_token:
             raise OAuthError("No access_token in Google response")
-
-        # 3. Fetch user info (for display in UI — email of the provider account)
-        user_info = await handler.fetch_user_info(access_token, audit_callback=make_audit_callback(session, client_id))
-        logger.info("google_oauth_user_info_fetched", provider=provider, has_email=bool(user_info.get("email")))
 
         # 4. Store tokens securely
         secret_ref = await handler.store_tokens_securely(
@@ -292,19 +322,9 @@ async def google_oauth_callback(
             existing.granted_scopes = granted_scopes
             existing.connected_at = datetime.now(timezone.utc)
             existing.expires_at = await _get_capped_expires_at(session, client_id, token_data.get("expires_in"))
-            meta = dict(existing.provider_metadata) if existing.provider_metadata else {}
-            if user_info.get("email"):
-                meta["account_email"] = user_info.get("email")
-            if user_info.get("name"):
-                meta["account_name"] = user_info.get("name")
-            existing.provider_metadata = meta
             connection = existing
         else:
             meta = {}
-            if user_info.get("email"):
-                meta["account_email"] = user_info.get("email")
-            if user_info.get("name"):
-                meta["account_name"] = user_info.get("name")
             connection = Connection(
                 client_id=client_id,
                 provider=provider,
@@ -364,6 +384,7 @@ async def meta_oauth_init(
 ) -> Any:
     """Initiate Meta Business OAuth flow."""
     auth.require_client_access(client_id)
+    await _require_active_engagement(session, client_id)
 
     handler = MetaOAuthHandler()
     settings = get_settings()
@@ -412,9 +433,12 @@ async def meta_oauth_callback(
         user_id = oauth_state.user_id
 
         handler = MetaOAuthHandler()
-        token_data = await handler.exchange_code(code, settings.meta_oauth_redirect_uri, audit_callback=make_audit_callback(session, client_id))
-
-        user_info = await handler.fetch_user_info(token_data.get("access_token", ""))
+        token_data = await handler.exchange_code(
+            code,
+            settings.meta_oauth_redirect_uri,
+            audit_callback=make_audit_callback(session, client_id),
+            client_id=str(client_id)
+        )
 
         secret_ref = await handler.store_tokens_securely(str(client_id), token_data)
 
@@ -429,9 +453,17 @@ async def meta_oauth_callback(
                         ConnectionStatus.EXPIRED,
                     ]),
                 )
+            ).order_by(
+                Connection.resource_id.isnot(None).desc(),
+                Connection.connected_at.desc().nulls_last()
             )
         )
-        existing = result.scalar_one_or_none()
+        all_existing = list(result.scalars().all())
+        existing = all_existing[0] if all_existing else None
+        
+        # Deactivate stale duplicates
+        for stale in all_existing[1:]:
+            stale.status = ConnectionStatus.DISCONNECTED
         
         adapter = get_adapter("Meta")
         scopes = adapter.required_scopes if adapter else []
@@ -442,19 +474,9 @@ async def meta_oauth_callback(
             existing.scopes = scopes
             existing.connected_at = datetime.now(timezone.utc)
             existing.expires_at = await _get_capped_expires_at(session, client_id, token_data.get("expires_in"))
-            meta = dict(existing.provider_metadata) if existing.provider_metadata else {}
-            if user_info.get("email"):
-                meta["account_email"] = user_info.get("email")
-            if user_info.get("name"):
-                meta["account_name"] = user_info.get("name")
-            existing.provider_metadata = meta
             connection = existing
         else:
             meta = {}
-            if user_info.get("email"):
-                meta["account_email"] = user_info.get("email")
-            if user_info.get("name"):
-                meta["account_name"] = user_info.get("name")
             connection = Connection(
                 client_id=client_id,
                 provider="meta",
@@ -497,6 +519,7 @@ async def github_oauth_init(
     not requested at OAuth init time.
     """
     auth.require_client_access(client_id)
+    await _require_active_engagement(session, client_id)
 
     handler = GitHubAppHandler()
 
@@ -552,10 +575,10 @@ async def github_oauth_callback(
         params = urlencode({"error": "Missing state parameter", "provider": "github"})
         return RedirectResponse(f"{frontend_base}/integrations/callback?{params}")
 
-    # GitHub App may send only installation_id without code on initial install
-    # (setup_action=install). If code is missing, we still record the installation.
-    if not code and not installation_id:
-        params = urlencode({"error": "Missing code and installation_id", "provider": "github"})
+    # GitHub App installation passes installation_id.
+    # We do not use user OAuth codes.
+    if not installation_id:
+        params = urlencode({"error": "Missing installation_id", "provider": "github"})
         return RedirectResponse(f"{frontend_base}/integrations/callback?{params}")
 
     try:
@@ -565,34 +588,16 @@ async def github_oauth_callback(
 
         logger.info(
             "github_app_callback_received",
-            has_code=bool(code),
             has_installation_id=bool(installation_id),
             setup_action=setup_action,
         )
 
         handler = GitHubAppHandler()
 
-        # Exchange code for user-level token (if code is present)
-        token_data: dict[str, Any] = {}
-        user_info: dict[str, Any] = {}
-        if code:
-            token_data = await handler.exchange_code(code, audit_callback=make_audit_callback(session, client_id))
-            user_access_token = token_data.get("access_token", "")
-            user_info = await handler.fetch_user_info(user_access_token)
-            
-            # If we didn't get an installation_id from the URL (OAuth flow), fetch installations
-            if not installation_id and user_access_token:
-                installations = await handler.fetch_user_installations(user_access_token)
-                if installations:
-                    # For simplicity, use the first installation they have access to
-                    installation_id = str(installations[0].get("id", ""))
-                    logger.info("github_fetched_user_installation", installation_id=installation_id)
-
-        # Store token + installation_id securely
+        # Store installation_id securely
         secret_ref = await handler.store_tokens_securely(
             str(client_id),
-            token_data,
-            installation_id=installation_id or "",
+            installation_id=installation_id,
         )
 
         # Find existing connection
@@ -607,9 +612,9 @@ async def github_oauth_callback(
                         ConnectionStatus.EXPIRED,
                     ]),
                 )
-            )
+            ).order_by(Connection.connected_at.desc().nulls_last())
         )
-        existing = result.scalar_one_or_none()
+        existing = result.scalars().first()
 
         adapter = get_adapter("github")
         scopes = adapter.required_scopes if adapter else []
@@ -620,17 +625,13 @@ async def github_oauth_callback(
             meta["installation_id"] = installation_id
         if setup_action:
             meta["setup_action"] = setup_action
-        if user_info.get("email"):
-            meta["account_email"] = user_info["email"]
-        if user_info.get("login") or user_info.get("name"):
-            meta["account_name"] = user_info.get("login") or user_info.get("name")
 
         if existing:
             existing.status = ConnectionStatus.CONNECTED
             existing.secret_ref = secret_ref
             existing.scopes = scopes
             existing.connected_at = datetime.now(timezone.utc)
-            existing.expires_at = await _get_capped_expires_at(session, client_id, token_data.get("expires_in"))
+            existing.expires_at = await _get_capped_expires_at(session, client_id, None)
             # Merge new metadata with existing (preserve resource selection)
             old_meta = dict(existing.provider_metadata) if existing.provider_metadata else {}
             old_meta.update(meta)
@@ -644,7 +645,7 @@ async def github_oauth_callback(
                 scopes=scopes,
                 secret_ref=secret_ref,
                 connected_at=datetime.now(timezone.utc),
-                expires_at=await _get_capped_expires_at(session, client_id, token_data.get("expires_in")),
+                expires_at=await _get_capped_expires_at(session, client_id, None),
                 provider_metadata=meta if meta else None,
             )
             session.add(connection)
@@ -692,18 +693,15 @@ async def list_resources(
 
     # Find the active connection for this provider
     result = await session.execute(
-        select(Connection).where(
-            and_(
-                Connection.client_id == client_id,
-                Connection.provider == provider,
-                Connection.status == ConnectionStatus.CONNECTED,
-            )
-        )
+        apply_client_isolation(select(Connection).where(and_(Connection.provider == provider, Connection.status == ConnectionStatus.CONNECTED)), Connection, auth).where(Connection.client_id == client_id)
     )
     connection = result.scalar_one_or_none()
 
     if not connection or not connection.secret_ref:
         raise HTTPException(status_code=400, detail=f"No active connection for provider '{provider}'")
+
+    if await _enforce_engagement_expiry(session, connection):
+        raise HTTPException(status_code=403, detail="Access expired — engagement period ended")
 
     # Retrieve the access token from SecretManager
     secret_manager = get_secret_manager()
@@ -711,7 +709,8 @@ async def list_resources(
         token_json = await secret_manager.get_secret(str(client_id), connection.secret_ref)
         token_data = json.loads(token_json)
         access_token = token_data.get("access_token")
-    except Exception:
+    except Exception as e:
+        print("SECRET MANAGER EXCEPTION:", e)
         raise HTTPException(status_code=400, detail="Failed to retrieve credentials — try reconnecting")
 
     if not access_token and provider != "github":
@@ -721,51 +720,48 @@ async def list_resources(
         resources: list[dict[str, Any]] = []
 
         if provider == "gtm":
-            resources = await fetch_gtm_containers(access_token, audit_callback=make_audit_callback(session, client_id))
+            resources = await fetch_gtm_containers(access_token, audit_callback=make_audit_callback(session, client_id), client_id=str(client_id))
         elif provider == "ga4":
-            resources = await fetch_ga4_properties(access_token, audit_callback=make_audit_callback(session, client_id))
+            resources = await fetch_ga4_properties(access_token, audit_callback=make_audit_callback(session, client_id), client_id=str(client_id))
         elif provider == "search_console":
-            resources = await fetch_search_console_sites(access_token, audit_callback=make_audit_callback(session, client_id))
+            resources = await fetch_search_console_sites(access_token, audit_callback=make_audit_callback(session, client_id), client_id=str(client_id))
         elif provider == "meta":
-            resources = await fetch_meta_businesses(access_token, audit_callback=make_audit_callback(session, client_id))
+            resources = await fetch_meta_businesses(access_token, audit_callback=make_audit_callback(session, client_id), client_id=str(client_id))
         elif provider == "github":
             # GitHub App: use installation_id to get installation-scoped token
-            # then fetch repos accessible to the installation
+            # then fetch repos accessible to the installation. No user token fallback.
             conn_meta = connection.provider_metadata or {}
             inst_id = conn_meta.get("installation_id") or token_data.get("installation_id", "")
-            if inst_id:
-                try:
-                    gh_handler = GitHubAppHandler()
-                    inst_token_data = await gh_handler.get_installation_token(inst_id)
-                    inst_access_token = inst_token_data.get("token", "")
-                    if inst_access_token:
-                        resources = await fetch_github_repos(
-                            inst_access_token,
-                            installation_id=inst_id,
-                            audit_callback=make_audit_callback(session, client_id),
-                        )
-                    else:
-                        logger.warning("github_no_installation_token", installation_id=inst_id)
-                        resources = await fetch_github_repos(
-                            access_token or "",
-                            audit_callback=make_audit_callback(session, client_id),
-                        )
-                except Exception as e:
-                    logger.warning("github_installation_token_error", error=str(e))
-                    # Fallback to user token if installation token fails
-                    if access_token:
-                        resources = await fetch_github_repos(
-                            access_token, audit_callback=make_audit_callback(session, client_id),
-                        )
-            elif access_token:
-                resources = await fetch_github_repos(access_token, audit_callback=make_audit_callback(session, client_id))
-            else:
+            if not inst_id:
                 raise HTTPException(
                     status_code=400,
-                    detail="GitHub App installation_id not found — try reconnecting",
+                    detail="GitHub App installation_id not found — the GitHub App may not be installed. Please reconnect.",
+                )
+            try:
+                gh_handler = GitHubAppHandler()
+                inst_token_data = await gh_handler.get_installation_token(inst_id, audit_callback=make_audit_callback(session, client_id), client_id=str(client_id))
+                inst_access_token = inst_token_data.get("token", "")
+                if not inst_access_token:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Failed to generate GitHub App installation token — check App configuration",
+                    )
+                resources = await fetch_github_repos(
+                    inst_access_token,
+                    installation_id=inst_id,
+                    audit_callback=make_audit_callback(session, client_id),
+                    client_id=str(client_id),
+                )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.warning("github_installation_token_error", error=str(e))
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"GitHub App access failed: {e}. Try reconnecting.",
                 )
         elif provider == "google_ads":
-            resources = await fetch_google_ads_customers(access_token, audit_callback=make_audit_callback(session, client_id))
+            resources = await fetch_google_ads_customers(access_token, audit_callback=make_audit_callback(session, client_id), client_id=str(client_id))
         else:
             raise HTTPException(status_code=400, detail=f"Resource listing not supported for '{provider}'")
 
@@ -870,7 +866,7 @@ async def list_connections(
     auth.require_client_access(client_id)
 
     result = await session.execute(
-        select(Connection).where(Connection.client_id == client_id)
+        apply_client_isolation(select(Connection).where(Connection.client_id == client_id), Connection, auth)
     )
     return result.scalars().all()
 
@@ -881,6 +877,8 @@ async def select_resource(
     client_id: uuid.UUID = Query(...),
     resource_id: str = Query(...),
     resource_name: str = Query(""),
+    connection_id: uuid.UUID | None = Query(None),
+    payload: SelectResourcePayload | None = Body(None),
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> Any:
@@ -888,37 +886,110 @@ async def select_resource(
 
     After OAuth callback creates a Connection, the user selects
     which resource (container, property, site) to use for assessment.
+
+    Handles duplicate connections by picking the most recently connected
+    row and deactivating stale duplicates.
     """
     auth.require_client_access(client_id)
+    
+    logger.info(f"Meta resource selection received: connection=?, business_id={resource_id}")
 
-    # Find the connection
-    result = await session.execute(
-        select(Connection).where(
-            and_(
-                Connection.client_id == client_id,
-                Connection.provider == provider,
-                Connection.status == ConnectionStatus.CONNECTED,
-            )
-        )
+    if provider == "meta" and not connection_id:
+        raise HTTPException(status_code=400, detail="connection_id is required for meta provider")
+
+    # Find ALL connected rows for this client+provider, ordered by most recent
+    query = select(Connection).where(
+        and_(Connection.provider == provider, Connection.status == ConnectionStatus.CONNECTED)
     )
-    connection = result.scalar_one_or_none()
+        
+    result = await session.execute(
+        apply_client_isolation(query, Connection, auth)
+        .where(Connection.client_id == client_id)
+        .order_by(Connection.connected_at.desc().nulls_last())
+    )
+    all_connections = list(result.scalars().all())
 
-    if not connection:
+    if not all_connections:
         raise HTTPException(status_code=404, detail=f"No active connection for provider '{provider}'")
 
+    if connection_id:
+        target_conn = next((c for c in all_connections if c.id == connection_id), None)
+        if not target_conn:
+            raise HTTPException(status_code=404, detail=f"No active connection found with ID {connection_id}")
+        connection = target_conn
+    else:
+        # Use the most recently connected row
+        connection = all_connections[0]
+
+    # Deactivate stale duplicates to prevent future divergence
+    for stale in all_connections:
+        if stale.id != connection.id:
+            stale.status = ConnectionStatus.DISCONNECTED
+            logger.info(
+                "deactivated_duplicate_connection",
+                provider=provider,
+                stale_id=str(stale.id),
+                kept_id=str(connection.id),
+            )
+
+    # For GitHub: validate the selected repo is within the installation scope
+    if provider == "github":
+        conn_meta = connection.provider_metadata or {}
+        inst_id = conn_meta.get("installation_id", "")
+        if not inst_id:
+            raise HTTPException(
+                status_code=400,
+                detail="GitHub App installation_id not found — reconnect the GitHub App",
+            )
+        try:
+            gh_handler = GitHubAppHandler()
+            inst_token_data = await gh_handler.get_installation_token(inst_id)
+            inst_access_token = inst_token_data.get("token", "")
+            if inst_access_token:
+                installation_repos = await fetch_github_repos(
+                    inst_access_token,
+                    installation_id=inst_id,
+                    audit_callback=make_audit_callback(session, client_id),
+                )
+                accessible_repo_ids = {r["id"] for r in installation_repos}
+                if resource_id not in accessible_repo_ids:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Repository '{resource_id}' is not accessible to the installed GitHub App. "
+                               f"Update the App installation to include this repository.",
+                    )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("github_scope_validation_failed", error=str(e))
+            # Don't block resource selection if scope check fails (e.g. network issue)
+            # The assessment will catch access errors later.
+
     # Update with selected resource
+    if provider == "google_ads":
+        resource_id = resource_id.replace("-", "")
+        
     connection.resource_id = resource_id
     connection.resource_name = resource_name
+    
+    if payload and payload.provider_metadata:
+        current_meta = connection.provider_metadata or {}
+        connection.provider_metadata = {**current_meta, **payload.provider_metadata}
 
     await session.commit()
+    await session.refresh(connection)
+    
+    logger.info(f"Meta connection after save: resource_id={connection.resource_id}, resource_selected={bool(connection.resource_id)}")
 
     return {
         "provider": provider,
         "status": "connected",
         "connection_id": str(connection.id),
+        "resource_id": connection.resource_id,
+        "resource_name": connection.resource_name,
         "resource": {
-            "id": resource_id,
-            "name": resource_name,
+            "id": connection.resource_id,
+            "name": connection.resource_name,
         },
     }
 
@@ -938,6 +1009,7 @@ async def finalize_connection(
     - Manual configuration connections
     """
     auth.require_client_access(client_id)
+    await _require_active_engagement(session, client_id)
 
     adapter = get_adapter(data.provider)
     scopes = adapter.required_scopes if adapter else []
@@ -963,35 +1035,6 @@ async def finalize_connection(
             resource = data.resource or {}
             resource_id = resource.get("site_id")
             resource_name = resource.get("site_name") or cmp_provider
-
-        elif data.provider == "google_ads":
-            # Google Ads: connection exists from OAuth, but may need customer ID
-            result = await session.execute(
-                select(Connection).where(
-                    and_(
-                        Connection.client_id == client_id,
-                        Connection.provider == "google_ads",
-                        Connection.status == ConnectionStatus.CONNECTED,
-                    )
-                )
-            )
-            existing = result.scalar_one_or_none()
-            if not existing:
-                raise HTTPException(status_code=400, detail="Connect Google Ads via OAuth first")
-
-            resource = data.resource or {}
-            customer_id = resource.get("customer_id", "")
-            if customer_id:
-                existing.resource_id = customer_id
-                existing.resource_name = f"Google Ads Account ({customer_id})"
-
-            await session.commit()
-            return {
-                "integration": "google_ads",
-                "status": "connected",
-                "connection_id": str(existing.id),
-                "resource": {"id": customer_id, "name": existing.resource_name},
-            }
 
         else:
             raise HTTPException(status_code=400, detail=f"Use OAuth flow for provider '{data.provider}'")
@@ -1122,7 +1165,7 @@ async def integration_status(
 
     # Fetch all connections for this client
     result = await session.execute(
-        select(Connection).where(Connection.client_id == client_id)
+        apply_client_isolation(select(Connection).where(Connection.client_id == client_id), Connection, auth)
     )
     connections = result.scalars().all()
 
@@ -1130,10 +1173,14 @@ async def integration_status(
     provider_map: dict[str, Connection] = {}
     for conn in connections:
         existing = provider_map.get(conn.provider)
-        if existing is None or (conn.connected_at and (
-            existing.connected_at is None or conn.connected_at > existing.connected_at
-        )):
+        if existing is None:
             provider_map[conn.provider] = conn
+        else:
+            if conn.status == ConnectionStatus.CONNECTED and existing.status != ConnectionStatus.CONNECTED:
+                provider_map[conn.provider] = conn
+            elif conn.status == existing.status:
+                if conn.connected_at and (existing.connected_at is None or conn.connected_at > existing.connected_at):
+                    provider_map[conn.provider] = conn
 
     # Providers that don't require post-OAuth resource selection
     NO_RESOURCE_SELECTION_PROVIDERS = {"cmp"}
@@ -1154,9 +1201,8 @@ async def integration_status(
                 resource_name=current_conn.resource_name,
                 resource_selected=has_resource,
                 requires_resource_selection=requires_res,
-                account_email=meta.get("account_email"),
-                account_name=meta.get("account_name"),
                 connected_at=current_conn.connected_at,
+                provider_metadata=meta,
             ))
         elif current_conn and current_conn.status == ConnectionStatus.ERROR:
             statuses.append(IntegrationStatusItem(
@@ -1208,18 +1254,15 @@ async def health_check_integration(
     auth.require_client_access(client_id)
 
     result = await session.execute(
-        select(Connection).where(
-            and_(
-                Connection.client_id == client_id,
-                Connection.provider == provider,
-                Connection.status == ConnectionStatus.CONNECTED,
-            )
-        )
+        apply_client_isolation(select(Connection).where(and_(Connection.provider == provider, Connection.status == ConnectionStatus.CONNECTED)), Connection, auth).where(Connection.client_id == client_id)
     )
     connection = result.scalar_one_or_none()
 
     if not connection:
         return {"provider": provider, "healthy": False, "message": "Not connected"}
+
+    if await _enforce_engagement_expiry(session, connection):
+        return {"provider": provider, "healthy": False, "message": "Access expired — engagement period ended"}
 
     if provider == "github":
         conn_meta = connection.provider_metadata or {}
@@ -1234,7 +1277,11 @@ async def health_check_integration(
 
         try:
             handler = GitHubAppHandler()
-            inst_token_data = await handler.get_installation_token(inst_id)
+            inst_token_data = await handler.get_installation_token(
+                inst_id,
+                audit_callback=make_audit_callback(session, client_id),
+                client_id=str(client_id)
+            )
             inst_token = inst_token_data.get("token", "")
 
             if not inst_token:
@@ -1246,7 +1293,14 @@ async def health_check_integration(
 
             # Verify access by listing repos (just 1 to minimize API calls)
             from app.integrations.base.http_client import AuditedHTTPClient
-            async with AuditedHTTPClient(provider="github", access_token=inst_token, audit_callback=make_audit_callback(session, client_id)) as client:
+            async with AuditedHTTPClient(
+                provider="github",
+                access_token=inst_token,
+                audit_callback=make_audit_callback(session, client_id),
+                client_id=str(client_id),
+                assessment_id=None,
+                obligations_served=["APP.auth.github"]
+            ) as client:
                 resp = await client.get(
                     "https://api.github.com/installation/repositories",
                     params={"per_page": 1},
@@ -1306,7 +1360,7 @@ async def health_check_integration(
                 try:
                     
                     
-                    await fetch_search_console_sites(token_data.get("access_token"), audit_callback=make_audit_callback(session, client_id))
+                    await fetch_search_console_sites(token_data.get("access_token"), audit_callback=make_audit_callback(session, client_id), client_id=str(client_id))
                     return {
                         "provider": provider,
                         "healthy": True,

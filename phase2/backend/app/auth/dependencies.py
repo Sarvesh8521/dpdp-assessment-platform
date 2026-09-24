@@ -255,3 +255,16 @@ def require_platform_admin(auth: AuthContext = Depends(get_current_user)) -> Aut
             detail="Platform administrator access required",
         )
     return auth
+
+from sqlalchemy import Select
+from typing import Type
+
+def apply_client_isolation(query: Select, model: Type[Any], auth: AuthContext) -> Select:
+    """Enforce client-level isolation at the query level."""
+    if auth.is_platform_admin:
+        return query
+    client_ids = [uuid.UUID(c) for c in auth.get_accessible_client_ids()]
+    if not client_ids:
+        # If no clients are accessible, return a query that is guaranteed to be empty
+        return query.where(False)
+    return query.where(model.client_id.in_(client_ids))

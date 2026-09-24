@@ -25,10 +25,13 @@ class ResourceFetchError(Exception):
     pass
 
 
-async def fetch_gtm_containers(access_token: str, audit_callback: Any = None) -> list[dict[str, Any]]:
+async def fetch_gtm_containers(access_token: str, audit_callback: Any = None, client_id: str | None = None, assessment_id: str | None = None) -> list[dict[str, Any]]:
     """Fetch GTM accounts and containers."""
     resources = []
-    async with AuditedHTTPClient(provider="gtm", access_token=access_token, audit_callback=audit_callback) as client:
+    async with AuditedHTTPClient(
+        provider="gtm", access_token=access_token, audit_callback=audit_callback,
+        client_id=client_id, assessment_id=assessment_id, obligations_served=["APP.auth.gtm"]
+    ) as client:
         try:
             resp = await client.get(
                 "https://www.googleapis.com/tagmanager/v2/accounts",
@@ -62,10 +65,13 @@ async def fetch_gtm_containers(access_token: str, audit_callback: Any = None) ->
 
     return resources
 
-async def fetch_ga4_properties(access_token: str, audit_callback: Any = None) -> list[dict[str, Any]]:
+async def fetch_ga4_properties(access_token: str, audit_callback: Any = None, client_id: str | None = None, assessment_id: str | None = None) -> list[dict[str, Any]]:
     """Fetch GA4 properties."""
     resources = []
-    async with AuditedHTTPClient(provider="ga4", access_token=access_token, audit_callback=audit_callback) as client:
+    async with AuditedHTTPClient(
+        provider="ga4", access_token=access_token, audit_callback=audit_callback,
+        client_id=client_id, assessment_id=assessment_id, obligations_served=["APP.auth.ga4"]
+    ) as client:
         try:
             resp = await client.get(
                 "https://analyticsadmin.googleapis.com/v1beta/accountSummaries",
@@ -91,10 +97,13 @@ async def fetch_ga4_properties(access_token: str, audit_callback: Any = None) ->
 
     return resources
 
-async def fetch_search_console_sites(access_token: str, audit_callback: Any = None) -> list[dict[str, Any]]:
+async def fetch_search_console_sites(access_token: str, audit_callback: Any = None, client_id: str | None = None, assessment_id: str | None = None) -> list[dict[str, Any]]:
     """Fetch Search Console verified properties."""
     resources = []
-    async with AuditedHTTPClient(provider="search_console", access_token=access_token, audit_callback=audit_callback) as client:
+    async with AuditedHTTPClient(
+        provider="search_console", access_token=access_token, audit_callback=audit_callback,
+        client_id=client_id, assessment_id=assessment_id, obligations_served=["APP.auth.search_console"]
+    ) as client:
         try:
             resp = await client.get(
                 "https://www.googleapis.com/webmasters/v3/sites",
@@ -116,14 +125,17 @@ async def fetch_search_console_sites(access_token: str, audit_callback: Any = No
 
     return resources
 
-async def fetch_google_ads_customers(access_token: str, audit_callback: Any = None) -> list[dict[str, Any]]:
+async def fetch_google_ads_customers(access_token: str, audit_callback: Any = None, client_id: str | None = None, assessment_id: str | None = None) -> list[dict[str, Any]]:
     """Fetch accessible Google Ads customer accounts."""
     resources = []
     settings = get_settings()
     dev_token = getattr(settings, "google_ads_developer_token", None) or os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN", "")
 
     if dev_token:
-        async with AuditedHTTPClient(provider="google_ads", access_token=access_token, audit_callback=audit_callback) as client:
+        async with AuditedHTTPClient(
+            provider="google_ads", access_token=access_token, audit_callback=audit_callback,
+            client_id=client_id, assessment_id=assessment_id, obligations_served=["APP.auth.google_ads"]
+        ) as client:
             try:
                 resp = await client.get(
                     "https://googleads.googleapis.com/v17/customers:listAccessibleCustomers",
@@ -144,7 +156,7 @@ async def fetch_google_ads_customers(access_token: str, audit_callback: Any = No
     return resources
 
 async def validate_google_ads_customer(
-    access_token: str, customer_id: str, audit_callback: Any = None
+    access_token: str, customer_id: str, audit_callback: Any = None, client_id: str | None = None, assessment_id: str | None = None
 ) -> dict[str, Any] | None:
     """Validate a Google Ads customer ID."""
     clean_id = customer_id.replace("-", "").strip()
@@ -156,7 +168,10 @@ async def validate_google_ads_customer(
     dev_token = getattr(settings, "google_ads_developer_token", None) or os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN", "")
 
     if dev_token:
-        async with AuditedHTTPClient(provider="google_ads", access_token=access_token, audit_callback=audit_callback) as client:
+        async with AuditedHTTPClient(
+            provider="google_ads", access_token=access_token, audit_callback=audit_callback,
+            client_id=client_id, assessment_id=assessment_id, obligations_served=["APP.auth.google_ads"]
+        ) as client:
             try:
                 resp = await client.get(
                     f"https://googleads.googleapis.com/v17/customers/{clean_id}",
@@ -181,10 +196,13 @@ async def validate_google_ads_customer(
         },
     }
 
-async def fetch_meta_businesses(access_token: str, audit_callback: Any = None) -> list[dict[str, Any]]:
+async def fetch_meta_businesses(access_token: str, audit_callback: Any = None, client_id: str | None = None, assessment_id: str | None = None) -> list[dict[str, Any]]:
     """Fetch Meta Business Manager businesses."""
     resources = []
-    async with AuditedHTTPClient(provider="meta", access_token=access_token, audit_callback=audit_callback) as client:
+    async with AuditedHTTPClient(
+        provider="meta", access_token=access_token, audit_callback=audit_callback,
+        client_id=client_id, assessment_id=assessment_id, obligations_served=["APP.auth.meta"]
+    ) as client:
         try:
             resp = await client.get(
                 "https://graph.facebook.com/v21.0/me/businesses",
@@ -205,11 +223,14 @@ async def fetch_meta_businesses(access_token: str, audit_callback: Any = None) -
     return resources
 
 async def fetch_meta_business_assets(
-    access_token: str, business_id: str, audit_callback: Any = None
+    access_token: str, business_id: str, audit_callback: Any = None, client_id: str | None = None, assessment_id: str | None = None
 ) -> list[dict[str, Any]]:
     """Fetch assets for a specific Meta Business."""
     assets = []
-    async with AuditedHTTPClient(provider="meta", access_token=access_token, audit_callback=audit_callback) as client:
+    async with AuditedHTTPClient(
+        provider="meta", access_token=access_token, audit_callback=audit_callback,
+        client_id=client_id, assessment_id=assessment_id, obligations_served=["APP.auth.meta"]
+    ) as client:
         try:
             resp = await client.get(
                 f"https://graph.facebook.com/v21.0/{business_id}/owned_ad_accounts",
@@ -246,56 +267,24 @@ async def fetch_github_repos(
     access_token: str,
     installation_id: str = "",
     audit_callback: Any = None,
+    client_id: str | None = None,
+    assessment_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch GitHub repositories accessible to the authenticated user.
+    """Fetch GitHub repositories accessible to the GitHub App installation.
 
-    Uses /user/repos endpoint with the user's OAuth access token.
-    This works with tokens that have 'repo' scope.
+    PHASE2_SPEC Section 4.6: GitHub App only, scoped to named repositories.
+    Uses ONLY /installation/repositories with an installation access token.
+    Never calls /user/repos or accepts PATs.
 
-    Falls back to /installation/repositories if the user repos call fails
-    and an installation_id is available.
+    The access_token here must be an installation access token obtained via
+    POST /app/installations/{id}/access_tokens (JWT-authenticated).
     """
-    resources = []
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "DPDP-Assessment-Platform/2.0",
-    }
+    resources: list[dict[str, Any]] = []
 
-    async with AuditedHTTPClient(provider="github", access_token=access_token, audit_callback=audit_callback) as client:
-        # Try /user/repos first (works with OAuth user tokens)
-        try:
-            resp = await client.get(
-                "https://api.github.com/user/repos",
-                params={"per_page": 100, "sort": "updated", "direction": "desc"},
-                operation="github_fetch_user_repos"
-            )
-            if resp:
-                repos = resp
-                if isinstance(repos, list):
-                    for repo in repos:
-                        resources.append({
-                            "id": repo.get("full_name", ""),
-                            "name": repo.get("full_name", ""),
-                            "metadata": {
-                                "html_url": repo.get("html_url"),
-                                "private": repo.get("private", False),
-                                "default_branch": repo.get("default_branch"),
-                            },
-                        })
-                    logger.info(
-                        "github_repos_fetched",
-                        count=len(resources),
-                        endpoint="user/repos",
-                    )
-                    return resources
-
-            pass
-        except Exception as exc:
-            logger.warning("github_user_repos_exception", error=str(exc))
-
-        # Fallback: try /installation/repositories (for installation tokens)
+    async with AuditedHTTPClient(
+        provider="github", access_token=access_token, audit_callback=audit_callback,
+        client_id=client_id, assessment_id=assessment_id, obligations_served=["APP.auth.github"]
+    ) as client:
         try:
             resp = await client.get(
                 "https://api.github.com/installation/repositories",
@@ -303,8 +292,8 @@ async def fetch_github_repos(
                 operation="github_fetch_installation_repos"
             )
             if resp:
-                data = resp.json()
-                repos = data.get("repositories", []) if isinstance(data, dict) else []
+                data = resp if isinstance(resp, dict) else {}
+                repos = data.get("repositories", [])
                 for repo in repos:
                     resources.append({
                         "id": repo.get("full_name", ""),
@@ -321,16 +310,19 @@ async def fetch_github_repos(
                     count=len(resources),
                     endpoint="installation/repositories",
                 )
-            # AuditedHTTPClient throws on failure, so else is unreachable but keeping for logic
         except Exception as exc:
             logger.warning(
                 "github_installation_repos_exception",
                 error=str(exc),
             )
+            raise ResourceFetchError(
+                f"Failed to fetch GitHub App installation repos: {exc}"
+            )
 
     if not resources:
         raise ResourceFetchError(
-            "Failed to fetch GitHub repos — ensure the token has 'repo' scope"
+            "No repositories found — ensure the GitHub App is installed "
+            "and has access to at least one repository"
         )
 
     return resources

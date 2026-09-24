@@ -32,7 +32,7 @@ from app.db.models.evidence import Evidence
 from app.db.models.obligation import Obligation, ObligationCategory, ObligationSeverity
 from app.db.models.reconciliation_result import ReconciliationResult
 from app.db.repositories.base import TenantIsolatedRepository
-from app.domain.evidence import Confidence, EvidenceItem, Verdict
+from app.domain.evidence import Confidence, EvidenceItem, Verdict, StructuredEvidence
 from app.domain.obligations import OBLIGATIONS
 from app.integrations.base.adapter import ConnectionInfo
 from app.api.v1.integrations import make_audit_callback
@@ -45,6 +45,24 @@ from app.services.report_generator import ReportGeneratorService
 
 logger = get_logger(__name__)
 
+async def _enforce_engagement_expiry(session: AsyncSession, connection: Connection) -> bool:
+    """Check if engagement ended. If so, mark expired and revoke secret."""
+    if connection.status == ConnectionStatus.EXPIRED:
+        return True
+    
+    client = await session.get(Client, connection.client_id)
+    if client and client.engagement_end and datetime.now(timezone.utc) > client.engagement_end:
+        connection.status = ConnectionStatus.EXPIRED
+        connection.revoked_at = datetime.now(timezone.utc)
+        if connection.secret_ref:
+            try:
+                secret_manager = get_secret_manager()
+                await secret_manager.revoke_secret(str(connection.client_id), connection.secret_ref)
+            except Exception:
+                pass
+        await session.commit()
+        return True
+    return False
 
 class AssessmentService:
     def __init__(self, session: AsyncSession, client_id: uuid.UUID) -> None:
@@ -143,6 +161,10 @@ class AssessmentService:
 
             if is_expired:
                 try:
+                    if db_conn and await _enforce_engagement_expiry(self.session, db_conn):
+                        logger.info("engagement_expired_blocking_refresh", provider=provider)
+                        return "", "Access expired — engagement period ended"
+
                     from app.api.v1.oauth_handlers import GoogleOAuthHandler
                     handler = GoogleOAuthHandler()
                     new_tokens = await handler.refresh_access_token(
@@ -191,6 +213,9 @@ class AssessmentService:
         evidence_by_source: dict[str, list[EvidenceItem]] = {}
         all_db_evidence: list[tuple[Evidence, str]] = []
         is_demo = assessment.configuration.get("is_demo", False)
+        
+        # Map to track DB IDs for evidence loaded from history (like Phase 1)
+        historical_evidence_ids: dict[str, uuid.UUID] = {}
 
         # 1. Collect evidence for each integration
         for integration in data.config.integrations:
@@ -241,17 +266,16 @@ class AssessmentService:
                         Connection.client_id == self.client_id,
                         Connection.provider.in_(possible_names),
                         Connection.status == ConnectionStatus.CONNECTED,
+                    ).order_by(
+                        Connection.resource_id.isnot(None).desc(),
+                        Connection.connected_at.desc().nulls_last()
                     )
                 )
                 db_conn = conn_result.scalars().first()
 
                 # ---- TIME-BOXED ACCESS CHECK ----
                 if db_conn:
-                    client_model = await self.session.get(Client, self.client_id)
-                    now = datetime.now(timezone.utc)
-                    if client_model and client_model.engagement_end and now > client_model.engagement_end:
-                        db_conn.status = ConnectionStatus.EXPIRED
-                        await self.session.commit()
+                    if await _enforce_engagement_expiry(self.session, db_conn):
                         logger.info("engagement_expired_blocking_access", provider=adapter.provider)
                         
                         degraded_evidence = [
@@ -264,7 +288,7 @@ class AssessmentService:
                                 detail="Access expired — engagement period ended",
                                 raw_metadata={"error": "engagement_expired"}
                             )
-                            for obl_code in obl_codes
+                            for obl_code in adapter.obligations_answered
                         ]
                         for ev_item in degraded_evidence:
                             ev = Evidence(
@@ -308,26 +332,84 @@ class AssessmentService:
                 # Resolve token securely
                 access_token, token_err = await self._resolve_access_token(db_conn, adapter.provider)
 
-                # Graceful degradation if integration is connected but no resource is selected
-                NO_RESOURCE_REQUIRED = {"cmp", "meta"}
-                if db_conn and access_token and not db_conn.resource_id and integration.lower() not in NO_RESOURCE_REQUIRED and not is_demo:
-                    logger.info("integration_no_resource_degrading", provider=adapter.provider)
+                is_connected = False
+                if db_conn:
+                    if integration.lower() == "github":
+                        inst_id = db_conn.provider_metadata and db_conn.provider_metadata.get("installation_id")
+                        if inst_id:
+                            try:
+                                from app.api.v1.oauth_handlers import GitHubAppHandler
+                                gh_handler = GitHubAppHandler()
+                                inst_token_data = await gh_handler.get_installation_token(inst_id)
+                                inst_token = inst_token_data.get("token", "")
+                                if inst_token:
+                                    access_token = inst_token
+                                    is_connected = True
+                                    
+                                    # Fallback: if db_conn.resource_id is missing, but assessment provides github_repos, validate and persist it
+                                    if not db_conn.resource_id:
+                                        fallback_repos = data.config.github_repos or data.config.repositories
+                                        if fallback_repos:
+                                            fallback_repo = fallback_repos[0]
+                                            try:
+                                                from app.api.v1.resource_fetcher import fetch_github_repos
+                                                installation_repos = await fetch_github_repos(
+                                                    inst_token,
+                                                    installation_id=inst_id,
+                                                    audit_callback=make_audit_callback(self.session, self.client_id),
+                                                )
+                                                accessible_repo_ids = {r["id"] for r in installation_repos}
+                                                if fallback_repo in accessible_repo_ids:
+                                                    db_conn.resource_id = fallback_repo
+                                                    db_conn.resource_name = fallback_repo
+                                                    await self.session.commit()
+                                                    logger.info("github_fallback_repo_persisted", repo=fallback_repo)
+                                                else:
+                                                    token_err = f"Repository '{fallback_repo}' is not accessible to the installed GitHub App."
+                                                    is_connected = False
+                                            except Exception as fe:
+                                                logger.warning("github_fallback_validation_failed", error=str(fe))
+                                else:
+                                    token_err = "GitHub App installation token could not be generated."
+                            except Exception as e:
+                                logger.warning("github_installation_token_for_scan_failed", error=str(e))
+                                token_err = f"Failed to generate GitHub App installation token: {str(e)}"
+                        else:
+                            token_err = "GitHub App installation_id missing from connection."
+                    else:
+                        is_connected = bool(access_token)
+
+                # Graceful degradation if integration is not connected and not in demo mode
+                if not is_connected and not is_demo:
+                    logger.info("integration_not_connected_degrading", provider=adapter.provider)
                     now = datetime.now(timezone.utc)
+                    reason_msg = token_err or f"{adapter.provider} integration is not connected."
                     degraded_evidence = [
                         EvidenceItem(
                             obligation_id=obl_code,
                             verdict=Verdict.CANNOT_DETERMINE,
                             confidence=Confidence.LOW,
-                            source=f"{adapter.id}:no_resource",
+                            source=f"{adapter.id}:not_connected",
                             observed_at=now,
-                            detail="Integration is connected but no assessment resource has been selected.",
+                            detail=reason_msg,
+                            structured_detail=StructuredEvidence(
+                                source=f"{adapter.id}:not_connected",
+                                integration=adapter.provider,
+                                operation="connection_check",
+                                resource_type="integration",
+                                observed_at=now,
+                                detail=reason_msg,
+                                expected_state="Connected and accessible",
+                                observed_state="Unavailable",
+                                reason=reason_msg,
+                            )
                         )
                         for obl_code in adapter.obligations_answered
                     ]
                     evidence_by_source[adapter.id] = degraded_evidence
                     run.evidence_count = len(degraded_evidence)
                     run.status = RunStatus.COMPLETED
-                    run.failure_reason = "No assessment resource selected; degraded to Cannot Determine"
+                    run.failure_reason = f"Integration not connected; degraded to Cannot Determine: {reason_msg}"
                     run.completed_at = datetime.now(timezone.utc)
 
                     for item in degraded_evidence:
@@ -345,26 +427,37 @@ class AssessmentService:
                         all_db_evidence.append((ev, item.obligation_id))
                     continue
 
-                # Graceful degradation if integration is not connected and not in demo mode
-                if (not db_conn or not access_token) and not is_demo:
-                    logger.info("integration_not_connected_degrading", provider=adapter.provider)
+                # Graceful degradation if integration is connected but no resource is selected
+                NO_RESOURCE_REQUIRED = {"cmp"}
+                if not db_conn.resource_id and integration.lower() not in NO_RESOURCE_REQUIRED and not is_demo:
+                    logger.info("integration_no_resource_degrading", provider=adapter.provider)
                     now = datetime.now(timezone.utc)
                     degraded_evidence = [
                         EvidenceItem(
                             obligation_id=obl_code,
                             verdict=Verdict.CANNOT_DETERMINE,
                             confidence=Confidence.LOW,
-                            source=f"{adapter.id}:not_connected",
+                            source=f"{adapter.id}:no_resource",
                             observed_at=now,
-                            detail=f"Integration '{adapter.provider}' is not connected. "
-                                   f"Cannot determine compliance for obligation {obl_code}.",
+                            detail=f"Assessment resource for {adapter.provider} was not selected.",
+                            structured_detail=StructuredEvidence(
+                                source=f"{adapter.id}:no_resource",
+                                integration=adapter.provider,
+                                operation="resource_selection",
+                                resource_type="resource",
+                                observed_at=now,
+                                detail=f"Assessment resource for {adapter.provider} was not selected.",
+                                expected_state="Connected and accessible",
+                                observed_state="Unavailable",
+                                reason=f"Assessment resource for {adapter.provider} was not selected.",
+                            )
                         )
                         for obl_code in adapter.obligations_answered
                     ]
                     evidence_by_source[adapter.id] = degraded_evidence
                     run.evidence_count = len(degraded_evidence)
                     run.status = RunStatus.COMPLETED
-                    run.failure_reason = "Integration not connected; degraded to Cannot Determine"
+                    run.failure_reason = "No assessment resource selected; degraded to Cannot Determine"
                     run.completed_at = datetime.now(timezone.utc)
 
                     for item in degraded_evidence:
@@ -399,11 +492,15 @@ class AssessmentService:
                         kwargs["customer_id"] = ad_account
 
                 # Meta ad account from config or connection
-                if integration.lower() == "meta":
-                    ad_account = (
-                        (data.config.ad_accounts and data.config.ad_accounts[0])
-                        or (db_conn and db_conn.resource_id)
-                    )
+                if integration.lower() in ("meta", "meta_marketing"):
+                    business_id = None
+                    if db_conn:
+                        meta_data = db_conn.provider_metadata or {}
+                        business_id = meta_data.get("business_id") or db_conn.resource_id
+                    if business_id:
+                        kwargs["business_id"] = business_id
+                        
+                    ad_account = data.config.ad_accounts and data.config.ad_accounts[0] if data.config else None
                     if ad_account:
                         kwargs["ad_account_id"] = ad_account
 
@@ -423,22 +520,7 @@ class AssessmentService:
                     if repos:
                         kwargs["repositories"] = repos
 
-                    # Use installation token for GitHub App scanning
-                    if db_conn and db_conn.provider_metadata:
-                        inst_id = db_conn.provider_metadata.get("installation_id", "")
-                        if inst_id:
-                            try:
-                                from app.api.v1.oauth_handlers import GitHubAppHandler
-                                gh_handler = GitHubAppHandler()
-                                inst_token_data = await gh_handler.get_installation_token(inst_id)
-                                inst_token = inst_token_data.get("token", "")
-                                if inst_token:
-                                    kwargs["access_token"] = inst_token
-                            except Exception as e:
-                                logger.warning(
-                                    "github_installation_token_for_scan_failed",
-                                    error=str(e),
-                                )
+                    # Installation token is generated earlier in the connection validation block
 
                 # Search Console property URL
                 if integration.lower() in ("search_console", "google_search_console"):
@@ -489,7 +571,18 @@ class AssessmentService:
                         confidence=Confidence.LOW,
                         source=f"{adapter.id}:error",
                         observed_at=now,
-                        detail=f"Failed to collect evidence from provider: {e}",
+                        detail=f"{adapter.provider} provider API failed: {str(e)}",
+                        structured_detail=StructuredEvidence(
+                            source=f"{adapter.id}:error",
+                            integration=adapter.provider,
+                            operation="api_call",
+                            resource_type="integration",
+                            observed_at=now,
+                            detail=f"{adapter.provider} provider API failed: {str(e)}",
+                            expected_state="Connected and accessible",
+                            observed_state="Unavailable",
+                            reason=f"{adapter.provider} provider API failed: {str(e)}",
+                        )
                     )
                     for obl_code in adapter.obligations_answered
                 ]
@@ -512,49 +605,64 @@ class AssessmentService:
                     all_db_evidence.append((ev, item.obligation_id))
 
         # Ingest Phase 1 scanner evidence for cross-source reconciliation
-        if "phase1_scanner" not in evidence_by_source and is_demo:
-            from app.integrations.fixtures import FIXTURES_BY_INTEGRATION
-            p1_items = FIXTURES_BY_INTEGRATION.get("phase1_scanner", [])
-            evidence_by_source["phase1_scanner"] = p1_items
-            for item in p1_items:
-                ev = Evidence(
-                    client_id=self.client_id,
-                    assessment_id=assessment.id,
-                    verdict=item.verdict,
-                    confidence=item.confidence,
-                    source=item.source,
-                    observed_at=item.observed_at,
-                    detail=item.detail,
-                    sanitized_metadata=item.raw_metadata,
-                    structured_detail=item.structured_detail.model_dump(mode="json") if item.structured_detail else None,
-                )
-                all_db_evidence.append((ev, item.obligation_id))
+        if "phase1_scanner" not in evidence_by_source:
+            if is_demo:
+                from app.integrations.fixtures import FIXTURES_BY_INTEGRATION
+                p1_items = FIXTURES_BY_INTEGRATION.get("phase1_scanner", [])
+                evidence_by_source["phase1_scanner"] = p1_items
+                for item in p1_items:
+                    ev = Evidence(
+                        client_id=self.client_id,
+                        assessment_id=assessment.id,
+                        verdict=item.verdict,
+                        confidence=item.confidence,
+                        source=item.source,
+                        observed_at=item.observed_at,
+                        detail=item.detail,
+                        sanitized_metadata=item.raw_metadata,
+                        structured_detail=item.structured_detail.model_dump(mode="json") if item.structured_detail else None,
+                    )
+                    all_db_evidence.append((ev, item.obligation_id))
+            else:
+                p1_items = []
+                if data.config.phase1_results:
+                    for raw_item in data.config.phase1_results:
+                        try:
+                            # Normalize incoming Phase 1 results using the existing Evidence model
+                            # This strictly preserves only the required fields and strips arbitrary payloads/PII
+                            item = EvidenceItem.model_validate(raw_item)
+                            p1_items.append(item)
+                        except Exception as e:
+                            logger.warning(f"Phase 1 evidence ingestion validation error: {e}")
+                
+                # Expose Phase 1 data to reconciliation
+                # If unavailable, it remains empty and is treated as a missing source (insufficient_data), not fabricated
+                if p1_items:
+                    evidence_by_source["phase1_scanner"] = p1_items
+                    for item in p1_items:
+                        # Must resolve string obligation code to internal UUID for database persistence
+                        obl_uuid = next((u for u, code in obligations.items() if code == item.obligation_id), None)
+                        if not obl_uuid:
+                            continue
+                            
+                        ev = Evidence(
+                            client_id=self.client_id,
+                            assessment_id=assessment.id,
+                            verdict=item.verdict,
+                            confidence=item.confidence,
+                            source=item.source,
+                            observed_at=item.observed_at,
+                            detail=item.detail,
+                            sanitized_metadata=item.raw_metadata,
+                            structured_detail=item.structured_detail.model_dump(mode="json") if item.structured_detail else None,
+                        )
+                        all_db_evidence.append((ev, obl_uuid))
 
         # Ingest declared assessment scope as scope_sheet evidence for cross-source reconciliation
         now_ts = datetime.now(timezone.utc)
         scope_evidence: list[EvidenceItem] = []
         # Map legacy fields into DeclaredScope if they exist but scope fields are empty
         scope = data.config.scope
-        
-        # properties
-        all_props = list(set(scope.search_console_properties + scope.analytics_properties + scope.domains + scope.subdomains + data.config.properties + data.config.domains + (data.config.declared_properties or [])))
-        if all_props:
-            scope.search_console_properties = list(set(scope.search_console_properties + all_props))
-            
-        # platforms
-        all_platforms = list(set(scope.marketing_platforms + scope.cmp_platforms + data.config.platforms + data.config.integrations))
-        if all_platforms:
-            scope.marketing_platforms = list(set(scope.marketing_platforms + all_platforms))
-            
-        # ad accounts
-        all_ad_accounts = list(set(scope.google_ads_accounts + data.config.ad_accounts))
-        if all_ad_accounts:
-            scope.google_ads_accounts = list(set(scope.google_ads_accounts + all_ad_accounts))
-            
-        # repositories
-        all_repos = list(set(scope.repositories + data.config.github_repos + data.config.repositories))
-        if all_repos:
-            scope.repositories = list(set(scope.repositories + all_repos))
 
         if scope.search_console_properties:
             scope_evidence.append(EvidenceItem(
@@ -610,6 +718,14 @@ class AssessmentService:
                 logger.error("unknown_obligation_code", obligation_code=obl_code)
                 raise ValueError(f"Unknown obligation code: '{obl_code}' cannot be mapped to database obligations")
 
+        await self.session.flush()
+
+        # Build comprehensive mapping of source -> DB evidence ID
+        evidence_source_map = dict(historical_evidence_ids)
+        for ev, _ in all_db_evidence:
+            if ev.id:
+                evidence_source_map[ev.source] = ev.id
+
         # 2. Run Cross-Source Reconciliation Engine
         from app.db.models.reconciliation_result import ReconciliationOutcome
         from app.db.models.evidence import Confidence as DBConfidence
@@ -620,6 +736,20 @@ class AssessmentService:
                 continue
             outcome_val = rf.outcome.value if hasattr(rf.outcome, "value") else str(rf.outcome)
             conf_val = rf.confidence.value if hasattr(rf.confidence, "value") else str(rf.confidence)
+            
+            # Resolve the first valid DB ID for evidence_a and evidence_b foreign keys
+            evidence_a_db_id = None
+            for src in (rf.evidence_a_ids or []):
+                if src in evidence_source_map:
+                    evidence_a_db_id = evidence_source_map[src]
+                    break
+                    
+            evidence_b_db_id = None
+            for src in (rf.evidence_b_ids or []):
+                if src in evidence_source_map:
+                    evidence_b_db_id = evidence_source_map[src]
+                    break
+            
             rr = ReconciliationResult(
                 assessment_id=assessment.id,
                 rule_id=rf.rule_id,
@@ -630,9 +760,13 @@ class AssessmentService:
                 confidence=DBConfidence(conf_val.lower()),
                 detail=rf.detail,
                 human_review_required=rf.human_review_required,
+                evidence_a_id=evidence_a_db_id,
+                evidence_b_id=evidence_b_db_id,
                 reconciliation_metadata={
                     "evidence_a_detail": rf.evidence_a_detail,
                     "evidence_b_detail": rf.evidence_b_detail,
+                    "evidence_a_ids": rf.evidence_a_ids,
+                    "evidence_b_ids": rf.evidence_b_ids,
                 },
             )
             self.session.add(rr)

@@ -1,0 +1,905 @@
+{
+  "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+  "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+  "generated_at": "2026-09-23T11:10:22.441578+00:00",
+  "status": "COMPLETED",
+  "summary": {
+    "total_findings": 3,
+    "override_metrics": {
+      "total_actual_findings": 3,
+      "overridden_count": 2,
+      "override_rate": 0.6667,
+      "health_warning": true,
+      "by_obligation": {
+        "POL-1": {
+          "total": 1,
+          "overridden": 1,
+          "override_rate": 1.0,
+          "health_warning": true
+        },
+        "TRK-1": {
+          "total": 2,
+          "overridden": 1,
+          "override_rate": 0.5,
+          "health_warning": true
+        }
+      }
+    },
+    "high_severity": 3,
+    "medium_severity": 0,
+    "low_severity": 0,
+    "requires_human_review": 0,
+    "verdicts": {
+      "observed": 2,
+      "not_observed": 1,
+      "cannot_determine": 0
+    },
+    "reconciliations_count": 0,
+    "reconciliation_contradictions": 0,
+    "integrations_assessed": [
+      "Google Analytics 4",
+      "Google Tag Manager",
+      "Google Search Console"
+    ],
+    "assessment_outcome": "Issues requiring attention were identified (2 observed)."
+  },
+  "selected_integrations": [
+    "gtm",
+    "ga4",
+    "search_console"
+  ],
+  "combined_report": {
+    "title": "Digital Personal Data Protection (DPDP) - Comprehensive Assessment Report",
+    "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+    "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+    "generated_at": "2026-09-23T11:10:22.441578+00:00",
+    "status": "COMPLETED",
+    "summary": {
+      "total_findings": 3,
+      "override_metrics": {
+        "total_actual_findings": 3,
+        "overridden_count": 2,
+        "override_rate": 0.6667,
+        "health_warning": true,
+        "by_obligation": {
+          "POL-1": {
+            "total": 1,
+            "overridden": 1,
+            "override_rate": 1.0,
+            "health_warning": true
+          },
+          "TRK-1": {
+            "total": 2,
+            "overridden": 1,
+            "override_rate": 0.5,
+            "health_warning": true
+          }
+        }
+      },
+      "high_severity": 3,
+      "medium_severity": 0,
+      "low_severity": 0,
+      "requires_human_review": 0,
+      "verdicts": {
+        "observed": 2,
+        "not_observed": 1,
+        "cannot_determine": 0
+      },
+      "reconciliations_count": 0,
+      "reconciliation_contradictions": 0,
+      "integrations_assessed": [
+        "Google Analytics 4",
+        "Google Tag Manager",
+        "Google Search Console"
+      ],
+      "assessment_outcome": "Issues requiring attention were identified (2 observed)."
+    },
+    "selected_integrations": [
+      "gtm",
+      "ga4",
+      "search_console"
+    ],
+    "individual_reports": {
+      "ga4": {
+        "integration": "ga4",
+        "title": "Google Analytics 4 Assessment Report",
+        "integration_name": "Google Analytics 4",
+        "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+        "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+        "generated_at": "2026-09-23T11:10:22.441578+00:00",
+        "connection_metadata": {
+          "provider": "ga4",
+          "resource_name": null,
+          "connected_at": null
+        },
+        "summary": {
+          "total_findings": 2,
+          "override_metrics": {
+            "total_actual_findings": 2,
+            "overridden_count": 1,
+            "override_rate": 0.5,
+            "health_warning": true
+          },
+          "high_severity": 2,
+          "medium_severity": 0,
+          "low_severity": 0,
+          "verdicts": {
+            "observed": 1,
+            "not_observed": 1,
+            "cannot_determine": 0
+          },
+          "requires_human_review": 0,
+          "assessment_outcome": "Integration not connected; no provider evidence collected."
+        },
+        "findings": [
+          {
+            "finding_id": "f6d64e1f-baf5-4786-afe4-698155bbd583",
+            "obligation_id": "TRK-1",
+            "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+            "obligation_code": "TRK-1",
+            "obligation_title": "Restrict Tracking",
+            "dpdp_section": "section 1",
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "overridden",
+            "is_overridden": true,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "ga4:456"
+            ],
+            "evidence_details": []
+          },
+          {
+            "finding_id": "09c0272e-ec35-4d46-9177-a7ed6054eda3",
+            "obligation_id": "TRK-1",
+            "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+            "obligation_code": "TRK-1",
+            "obligation_title": "Restrict Tracking",
+            "dpdp_section": "section 1",
+            "verdict": "Not observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "ga4:789"
+            ],
+            "evidence_details": []
+          }
+        ],
+        "issues": [
+          {
+            "finding_id": "f6d64e1f-baf5-4786-afe4-698155bbd583",
+            "obligation_id": "TRK-1",
+            "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+            "obligation_code": "TRK-1",
+            "obligation_title": "Restrict Tracking",
+            "dpdp_section": "section 1",
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "overridden",
+            "is_overridden": true,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "ga4:456"
+            ],
+            "evidence_details": []
+          }
+        ],
+        "evaluated_obligations": [
+          {
+            "finding_id": "09c0272e-ec35-4d46-9177-a7ed6054eda3",
+            "obligation_id": "TRK-1",
+            "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+            "obligation_code": "TRK-1",
+            "obligation_title": "Restrict Tracking",
+            "dpdp_section": "section 1",
+            "verdict": "Not observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "ga4:789"
+            ],
+            "evidence_details": []
+          }
+        ]
+      },
+      "gtm": {
+        "integration": "gtm",
+        "title": "Google Tag Manager Assessment Report",
+        "integration_name": "Google Tag Manager",
+        "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+        "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+        "generated_at": "2026-09-23T11:10:22.441578+00:00",
+        "connection_metadata": {
+          "provider": "gtm",
+          "resource_name": null,
+          "connected_at": null
+        },
+        "summary": {
+          "total_findings": 1,
+          "override_metrics": {
+            "total_actual_findings": 1,
+            "overridden_count": 1,
+            "override_rate": 1.0,
+            "health_warning": true
+          },
+          "high_severity": 1,
+          "medium_severity": 0,
+          "low_severity": 0,
+          "verdicts": {
+            "observed": 1,
+            "not_observed": 0,
+            "cannot_determine": 0
+          },
+          "requires_human_review": 0,
+          "assessment_outcome": "Integration not connected; no provider evidence collected."
+        },
+        "findings": [
+          {
+            "finding_id": "c134aa5e-bd98-4b94-a5f0-f0918d2ee96f",
+            "obligation_id": "POL-1",
+            "obligation_uuid": "02000a0f-d3a6-442b-acb9-e94e548745b0",
+            "obligation_code": "POL-1",
+            "obligation_title": "Privacy Policy",
+            "dpdp_section": "section 1",
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "overridden",
+            "is_overridden": true,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "gtm:123"
+            ],
+            "evidence_details": []
+          }
+        ],
+        "issues": [
+          {
+            "finding_id": "c134aa5e-bd98-4b94-a5f0-f0918d2ee96f",
+            "obligation_id": "POL-1",
+            "obligation_uuid": "02000a0f-d3a6-442b-acb9-e94e548745b0",
+            "obligation_code": "POL-1",
+            "obligation_title": "Privacy Policy",
+            "dpdp_section": "section 1",
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "overridden",
+            "is_overridden": true,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "gtm:123"
+            ],
+            "evidence_details": []
+          }
+        ],
+        "evaluated_obligations": []
+      },
+      "search_console": {
+        "integration": "search_console",
+        "title": "Google Search Console Assessment Report",
+        "integration_name": "Google Search Console",
+        "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+        "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+        "generated_at": "2026-09-23T11:10:22.441578+00:00",
+        "connection_metadata": {
+          "provider": "search_console",
+          "resource_name": null,
+          "connected_at": null
+        },
+        "summary": {
+          "total_findings": 0,
+          "override_metrics": {
+            "total_actual_findings": 0,
+            "overridden_count": 0,
+            "override_rate": 0.0,
+            "health_warning": false
+          },
+          "high_severity": 0,
+          "medium_severity": 0,
+          "low_severity": 0,
+          "verdicts": {
+            "observed": 0,
+            "not_observed": 0,
+            "cannot_determine": 0
+          },
+          "requires_human_review": 0,
+          "assessment_outcome": "Integration not connected; no provider evidence collected."
+        },
+        "findings": [],
+        "issues": [],
+        "evaluated_obligations": []
+      }
+    },
+    "integration_reports": [
+      {
+        "integration": "ga4",
+        "title": "Google Analytics 4 Assessment Report",
+        "integration_name": "Google Analytics 4",
+        "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+        "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+        "generated_at": "2026-09-23T11:10:22.441578+00:00",
+        "connection_metadata": {
+          "provider": "ga4",
+          "resource_name": null,
+          "connected_at": null
+        },
+        "summary": {
+          "total_findings": 2,
+          "override_metrics": {
+            "total_actual_findings": 2,
+            "overridden_count": 1,
+            "override_rate": 0.5,
+            "health_warning": true
+          },
+          "high_severity": 2,
+          "medium_severity": 0,
+          "low_severity": 0,
+          "verdicts": {
+            "observed": 1,
+            "not_observed": 1,
+            "cannot_determine": 0
+          },
+          "requires_human_review": 0,
+          "assessment_outcome": "Integration not connected; no provider evidence collected."
+        },
+        "findings": [
+          {
+            "finding_id": "f6d64e1f-baf5-4786-afe4-698155bbd583",
+            "obligation_id": "TRK-1",
+            "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+            "obligation_code": "TRK-1",
+            "obligation_title": "Restrict Tracking",
+            "dpdp_section": "section 1",
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "overridden",
+            "is_overridden": true,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "ga4:456"
+            ],
+            "evidence_details": []
+          },
+          {
+            "finding_id": "09c0272e-ec35-4d46-9177-a7ed6054eda3",
+            "obligation_id": "TRK-1",
+            "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+            "obligation_code": "TRK-1",
+            "obligation_title": "Restrict Tracking",
+            "dpdp_section": "section 1",
+            "verdict": "Not observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "ga4:789"
+            ],
+            "evidence_details": []
+          }
+        ],
+        "issues": [
+          {
+            "finding_id": "f6d64e1f-baf5-4786-afe4-698155bbd583",
+            "obligation_id": "TRK-1",
+            "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+            "obligation_code": "TRK-1",
+            "obligation_title": "Restrict Tracking",
+            "dpdp_section": "section 1",
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "overridden",
+            "is_overridden": true,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "ga4:456"
+            ],
+            "evidence_details": []
+          }
+        ],
+        "evaluated_obligations": [
+          {
+            "finding_id": "09c0272e-ec35-4d46-9177-a7ed6054eda3",
+            "obligation_id": "TRK-1",
+            "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+            "obligation_code": "TRK-1",
+            "obligation_title": "Restrict Tracking",
+            "dpdp_section": "section 1",
+            "verdict": "Not observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "ga4:789"
+            ],
+            "evidence_details": []
+          }
+        ]
+      },
+      {
+        "integration": "gtm",
+        "title": "Google Tag Manager Assessment Report",
+        "integration_name": "Google Tag Manager",
+        "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+        "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+        "generated_at": "2026-09-23T11:10:22.441578+00:00",
+        "connection_metadata": {
+          "provider": "gtm",
+          "resource_name": null,
+          "connected_at": null
+        },
+        "summary": {
+          "total_findings": 1,
+          "override_metrics": {
+            "total_actual_findings": 1,
+            "overridden_count": 1,
+            "override_rate": 1.0,
+            "health_warning": true
+          },
+          "high_severity": 1,
+          "medium_severity": 0,
+          "low_severity": 0,
+          "verdicts": {
+            "observed": 1,
+            "not_observed": 0,
+            "cannot_determine": 0
+          },
+          "requires_human_review": 0,
+          "assessment_outcome": "Integration not connected; no provider evidence collected."
+        },
+        "findings": [
+          {
+            "finding_id": "c134aa5e-bd98-4b94-a5f0-f0918d2ee96f",
+            "obligation_id": "POL-1",
+            "obligation_uuid": "02000a0f-d3a6-442b-acb9-e94e548745b0",
+            "obligation_code": "POL-1",
+            "obligation_title": "Privacy Policy",
+            "dpdp_section": "section 1",
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "overridden",
+            "is_overridden": true,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "gtm:123"
+            ],
+            "evidence_details": []
+          }
+        ],
+        "issues": [
+          {
+            "finding_id": "c134aa5e-bd98-4b94-a5f0-f0918d2ee96f",
+            "obligation_id": "POL-1",
+            "obligation_uuid": "02000a0f-d3a6-442b-acb9-e94e548745b0",
+            "obligation_code": "POL-1",
+            "obligation_title": "Privacy Policy",
+            "dpdp_section": "section 1",
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "overridden",
+            "is_overridden": true,
+            "human_review_required": false,
+            "detail": "detail",
+            "reason": "reason",
+            "compliance_implication": "Compliance info",
+            "recommended_action": null,
+            "sources": [
+              "gtm:123"
+            ],
+            "evidence_details": []
+          }
+        ],
+        "evaluated_obligations": []
+      },
+      {
+        "integration": "search_console",
+        "title": "Google Search Console Assessment Report",
+        "integration_name": "Google Search Console",
+        "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+        "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+        "generated_at": "2026-09-23T11:10:22.441578+00:00",
+        "connection_metadata": {
+          "provider": "search_console",
+          "resource_name": null,
+          "connected_at": null
+        },
+        "summary": {
+          "total_findings": 0,
+          "override_metrics": {
+            "total_actual_findings": 0,
+            "overridden_count": 0,
+            "override_rate": 0.0,
+            "health_warning": false
+          },
+          "high_severity": 0,
+          "medium_severity": 0,
+          "low_severity": 0,
+          "verdicts": {
+            "observed": 0,
+            "not_observed": 0,
+            "cannot_determine": 0
+          },
+          "requires_human_review": 0,
+          "assessment_outcome": "Integration not connected; no provider evidence collected."
+        },
+        "findings": [],
+        "issues": [],
+        "evaluated_obligations": []
+      }
+    ],
+    "cross_source_reconciliation": []
+  },
+  "individual_reports": {
+    "ga4": {
+      "integration": "ga4",
+      "title": "Google Analytics 4 Assessment Report",
+      "integration_name": "Google Analytics 4",
+      "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+      "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+      "generated_at": "2026-09-23T11:10:22.441578+00:00",
+      "connection_metadata": {
+        "provider": "ga4",
+        "resource_name": null,
+        "connected_at": null
+      },
+      "summary": {
+        "total_findings": 2,
+        "override_metrics": {
+          "total_actual_findings": 2,
+          "overridden_count": 1,
+          "override_rate": 0.5,
+          "health_warning": true
+        },
+        "high_severity": 2,
+        "medium_severity": 0,
+        "low_severity": 0,
+        "verdicts": {
+          "observed": 1,
+          "not_observed": 1,
+          "cannot_determine": 0
+        },
+        "requires_human_review": 0,
+        "assessment_outcome": "Integration not connected; no provider evidence collected."
+      },
+      "findings": [
+        {
+          "finding_id": "f6d64e1f-baf5-4786-afe4-698155bbd583",
+          "obligation_id": "TRK-1",
+          "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+          "obligation_code": "TRK-1",
+          "obligation_title": "Restrict Tracking",
+          "dpdp_section": "section 1",
+          "verdict": "Observed",
+          "confidence": "high",
+          "severity": "high",
+          "status": "overridden",
+          "is_overridden": true,
+          "human_review_required": false,
+          "detail": "detail",
+          "reason": "reason",
+          "compliance_implication": "Compliance info",
+          "recommended_action": null,
+          "sources": [
+            "ga4:456"
+          ],
+          "evidence_details": []
+        },
+        {
+          "finding_id": "09c0272e-ec35-4d46-9177-a7ed6054eda3",
+          "obligation_id": "TRK-1",
+          "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+          "obligation_code": "TRK-1",
+          "obligation_title": "Restrict Tracking",
+          "dpdp_section": "section 1",
+          "verdict": "Not observed",
+          "confidence": "high",
+          "severity": "high",
+          "status": "open",
+          "is_overridden": false,
+          "human_review_required": false,
+          "detail": "detail",
+          "reason": "reason",
+          "compliance_implication": "Compliance info",
+          "recommended_action": null,
+          "sources": [
+            "ga4:789"
+          ],
+          "evidence_details": []
+        }
+      ],
+      "issues": [
+        {
+          "finding_id": "f6d64e1f-baf5-4786-afe4-698155bbd583",
+          "obligation_id": "TRK-1",
+          "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+          "obligation_code": "TRK-1",
+          "obligation_title": "Restrict Tracking",
+          "dpdp_section": "section 1",
+          "verdict": "Observed",
+          "confidence": "high",
+          "severity": "high",
+          "status": "overridden",
+          "is_overridden": true,
+          "human_review_required": false,
+          "detail": "detail",
+          "reason": "reason",
+          "compliance_implication": "Compliance info",
+          "recommended_action": null,
+          "sources": [
+            "ga4:456"
+          ],
+          "evidence_details": []
+        }
+      ],
+      "evaluated_obligations": [
+        {
+          "finding_id": "09c0272e-ec35-4d46-9177-a7ed6054eda3",
+          "obligation_id": "TRK-1",
+          "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+          "obligation_code": "TRK-1",
+          "obligation_title": "Restrict Tracking",
+          "dpdp_section": "section 1",
+          "verdict": "Not observed",
+          "confidence": "high",
+          "severity": "high",
+          "status": "open",
+          "is_overridden": false,
+          "human_review_required": false,
+          "detail": "detail",
+          "reason": "reason",
+          "compliance_implication": "Compliance info",
+          "recommended_action": null,
+          "sources": [
+            "ga4:789"
+          ],
+          "evidence_details": []
+        }
+      ]
+    },
+    "gtm": {
+      "integration": "gtm",
+      "title": "Google Tag Manager Assessment Report",
+      "integration_name": "Google Tag Manager",
+      "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+      "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+      "generated_at": "2026-09-23T11:10:22.441578+00:00",
+      "connection_metadata": {
+        "provider": "gtm",
+        "resource_name": null,
+        "connected_at": null
+      },
+      "summary": {
+        "total_findings": 1,
+        "override_metrics": {
+          "total_actual_findings": 1,
+          "overridden_count": 1,
+          "override_rate": 1.0,
+          "health_warning": true
+        },
+        "high_severity": 1,
+        "medium_severity": 0,
+        "low_severity": 0,
+        "verdicts": {
+          "observed": 1,
+          "not_observed": 0,
+          "cannot_determine": 0
+        },
+        "requires_human_review": 0,
+        "assessment_outcome": "Integration not connected; no provider evidence collected."
+      },
+      "findings": [
+        {
+          "finding_id": "c134aa5e-bd98-4b94-a5f0-f0918d2ee96f",
+          "obligation_id": "POL-1",
+          "obligation_uuid": "02000a0f-d3a6-442b-acb9-e94e548745b0",
+          "obligation_code": "POL-1",
+          "obligation_title": "Privacy Policy",
+          "dpdp_section": "section 1",
+          "verdict": "Observed",
+          "confidence": "high",
+          "severity": "high",
+          "status": "overridden",
+          "is_overridden": true,
+          "human_review_required": false,
+          "detail": "detail",
+          "reason": "reason",
+          "compliance_implication": "Compliance info",
+          "recommended_action": null,
+          "sources": [
+            "gtm:123"
+          ],
+          "evidence_details": []
+        }
+      ],
+      "issues": [
+        {
+          "finding_id": "c134aa5e-bd98-4b94-a5f0-f0918d2ee96f",
+          "obligation_id": "POL-1",
+          "obligation_uuid": "02000a0f-d3a6-442b-acb9-e94e548745b0",
+          "obligation_code": "POL-1",
+          "obligation_title": "Privacy Policy",
+          "dpdp_section": "section 1",
+          "verdict": "Observed",
+          "confidence": "high",
+          "severity": "high",
+          "status": "overridden",
+          "is_overridden": true,
+          "human_review_required": false,
+          "detail": "detail",
+          "reason": "reason",
+          "compliance_implication": "Compliance info",
+          "recommended_action": null,
+          "sources": [
+            "gtm:123"
+          ],
+          "evidence_details": []
+        }
+      ],
+      "evaluated_obligations": []
+    },
+    "search_console": {
+      "integration": "search_console",
+      "title": "Google Search Console Assessment Report",
+      "integration_name": "Google Search Console",
+      "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+      "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+      "generated_at": "2026-09-23T11:10:22.441578+00:00",
+      "connection_metadata": {
+        "provider": "search_console",
+        "resource_name": null,
+        "connected_at": null
+      },
+      "summary": {
+        "total_findings": 0,
+        "override_metrics": {
+          "total_actual_findings": 0,
+          "overridden_count": 0,
+          "override_rate": 0.0,
+          "health_warning": false
+        },
+        "high_severity": 0,
+        "medium_severity": 0,
+        "low_severity": 0,
+        "verdicts": {
+          "observed": 0,
+          "not_observed": 0,
+          "cannot_determine": 0
+        },
+        "requires_human_review": 0,
+        "assessment_outcome": "Integration not connected; no provider evidence collected."
+      },
+      "findings": [],
+      "issues": [],
+      "evaluated_obligations": []
+    }
+  },
+  "findings": [
+    {
+      "finding_id": "c134aa5e-bd98-4b94-a5f0-f0918d2ee96f",
+      "obligation_id": "POL-1",
+      "obligation_uuid": "02000a0f-d3a6-442b-acb9-e94e548745b0",
+      "obligation_code": "POL-1",
+      "obligation_title": "Privacy Policy",
+      "dpdp_section": "section 1",
+      "verdict": "Observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "overridden",
+      "is_overridden": true,
+      "human_review_required": false,
+      "detail": "detail",
+      "reason": "reason",
+      "compliance_implication": "Compliance info",
+      "recommended_action": null,
+      "sources": [
+        "gtm:123"
+      ],
+      "evidence_details": []
+    },
+    {
+      "finding_id": "f6d64e1f-baf5-4786-afe4-698155bbd583",
+      "obligation_id": "TRK-1",
+      "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+      "obligation_code": "TRK-1",
+      "obligation_title": "Restrict Tracking",
+      "dpdp_section": "section 1",
+      "verdict": "Observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "overridden",
+      "is_overridden": true,
+      "human_review_required": false,
+      "detail": "detail",
+      "reason": "reason",
+      "compliance_implication": "Compliance info",
+      "recommended_action": null,
+      "sources": [
+        "ga4:456"
+      ],
+      "evidence_details": []
+    },
+    {
+      "finding_id": "09c0272e-ec35-4d46-9177-a7ed6054eda3",
+      "obligation_id": "TRK-1",
+      "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+      "obligation_code": "TRK-1",
+      "obligation_title": "Restrict Tracking",
+      "dpdp_section": "section 1",
+      "verdict": "Not observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "open",
+      "is_overridden": false,
+      "human_review_required": false,
+      "detail": "detail",
+      "reason": "reason",
+      "compliance_implication": "Compliance info",
+      "recommended_action": null,
+      "sources": [
+        "ga4:789"
+      ],
+      "evidence_details": []
+    }
+  ],
+  "reconciliations": []
+}

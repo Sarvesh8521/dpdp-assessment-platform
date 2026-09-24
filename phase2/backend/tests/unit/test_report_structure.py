@@ -25,8 +25,7 @@ def _create_mock_assessment():
         id=uuid.uuid4(),
         client_id=uuid.uuid4(),
         status=AssessmentStatus.COMPLETED,
-        selected_integrations=["gtm", "meta", "google_ads", "github"],
-    )
+        selected_integrations=["gtm", "meta", "google_ads", "github"])
 
 
 def _create_mock_obligation(code, title):
@@ -34,8 +33,7 @@ def _create_mock_obligation(code, title):
         id=uuid.uuid4(),
         code=code,
         title=title,
-        severity=FindingSeverity.MEDIUM,
-    )
+        severity=FindingSeverity.MEDIUM)
 
 
 def _create_mock_finding(assessment, obligation, verdict, source, detail="test"):
@@ -62,8 +60,7 @@ def _create_mock_reconciliation(assessment):
         source_a="gtm:container",
         source_b="google_ads:customer",
         outcome=ReconciliationOutcome.CONTRADICTION,
-        detail="GTM has pixel, Google Ads does not",
-    )
+        detail="GTM has pixel, Google Ads does not")
 
 
 @pytest.mark.asyncio

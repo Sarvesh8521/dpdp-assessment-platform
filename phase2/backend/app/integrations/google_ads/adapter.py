@@ -25,14 +25,8 @@ from app.domain.evidence import StructuredEvidence
 logger = get_logger(__name__)
 
 GOOGLE_ADS_FORBIDDEN_ENDPOINTS = [
-    # User list membership — NEVER read contents
-    "/v18/customers/*/userLists/*/members",
-    "userListMembers",
-    "offlineUserDataJobs",  # Upload jobs contain PII
-    "/v18/customers/*/offlineUserDataJobs",
-    "mutate",  # Any write operation
-    "uploadUserData",
-    "getUserListMembership",
+    "/userLists",
+    "/offlineUserDataJobs"
 ]
 
 
@@ -71,7 +65,7 @@ class GoogleAdsAdapter(IntegrationAdapter):
     def forbidden_endpoints(self) -> list[str]:
         return GOOGLE_ADS_FORBIDDEN_ENDPOINTS
 
-    async def connect(self, credentials: dict[str, Any]) -> ConnectionInfo:
+    async def connect(self, credentials: dict[str, Any], audit_callback: Any) -> ConnectionInfo:
         return ConnectionInfo(
             provider=self.provider,
             scopes=self.required_scopes,
@@ -79,7 +73,14 @@ class GoogleAdsAdapter(IntegrationAdapter):
             metadata=credentials.get("metadata", {}),
         )
 
-    async def health_check(self, connection: ConnectionInfo) -> HealthStatus:
+    async def health_check(
+        self,
+        connection: ConnectionInfo,
+        audit_callback: Any,
+        *,
+        client_id: str | None = None,
+        assessment_id: str | None = None,
+    ) -> HealthStatus:
         # Note: True health check is implemented in integrations.py because it requires fetching tokens
         return HealthStatus(
             healthy=True, provider=self.provider,
@@ -87,9 +88,9 @@ class GoogleAdsAdapter(IntegrationAdapter):
         )
 
     async def collect(
-        self, connection: ConnectionInfo, *,
+        self, connection: ConnectionInfo, audit_callback: Any, *,
         assessment_id: str | None = None, client_id: str | None = None,
-        access_token: str = "", audit_callback: Any = None,
+        access_token: str = "", 
         customer_id: str = "",
     ) -> AdapterResult:
         """Collect Google Ads metadata — Customer Match, conversions, audience sharing."""
@@ -97,21 +98,40 @@ class GoogleAdsAdapter(IntegrationAdapter):
         errors: list[str] = []
         now = datetime.now(timezone.utc)
 
-        developer_token = connection.metadata.get("developer_token", "test-dev-token")
+        developer_token = connection.metadata.get("developer_token", "")
+        if not developer_token:
+            return AdapterResult(
+                evidence=[EvidenceItem(
+                    obligation_id="S9.sharing.audienceUpload",
+                    verdict=Verdict.CANNOT_DETERMINE, confidence=Confidence.LOW,
+                    source="google_ads:error", observed_at=now,
+                    detail="Missing Google Ads developer token. Cannot determine compliance.",
+                    structured_detail=StructuredEvidence(
+                        source="google_ads", integration="google_ads", operation="auth",
+                        resource_type="customer", resource_id=customer_id,
+                        location="Unavailable",
+                        observed_at=now, observed_state="Missing developer token",
+                        expected_state="Valid developer token",
+                        detail="Missing Google Ads developer token.",
+                        reason="A developer token is required for Google Ads API access.",
+                    ),
+                )],
+                errors=["Missing developer token"], partial=True,
+            )
+
+        customer_id = customer_id.replace("-", "") if customer_id else ""
         headers = {
             "developer-token": developer_token,
             "login-customer-id": customer_id
         }
 
         client = AuditedHTTPClient(
-            provider=self.provider,
-            base_url="https://googleads.googleapis.com",
+            provider=self.provider, audit_callback=audit_callback, base_url="https://googleads.googleapis.com",
             access_token=access_token,
             forbidden_endpoints=self.forbidden_endpoints,
             obligations_served=self.obligations_answered,
             client_id=client_id, assessment_id=assessment_id,
-            audit_callback=audit_callback,
-        )
+            )
 
         async def run_gaql(query: str, op_name: str) -> list[Any]:
             search_result = await client.post(

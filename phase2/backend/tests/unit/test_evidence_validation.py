@@ -21,8 +21,7 @@ def _create_mock_assessment():
     return Assessment(
         id=uuid.uuid4(),
         client_id=uuid.uuid4(),
-        status=AssessmentStatus.COMPLETED,
-    )
+        status=AssessmentStatus.COMPLETED)
 
 
 def _create_mock_obligation():
@@ -30,8 +29,7 @@ def _create_mock_obligation():
         id=uuid.uuid4(),
         code="S1.test",
         title="Test Obligation",
-        severity=ObligationSeverity.MEDIUM,
-    )
+        severity=ObligationSeverity.MEDIUM)
 
 
 def _create_mock_evidence(assessment, obligation, verdict, structured_detail):

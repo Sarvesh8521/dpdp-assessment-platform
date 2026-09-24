@@ -82,3 +82,20 @@ def test_sc_properties_vs_declared_no_declared():
     assert len(findings) == 1
     assert findings[0].outcome == "insufficient_data"
     assert "https://example.com" in findings[0].detail
+
+def test_sc_properties_vs_declared_missing_sc():
+    rule = SCPropertiesVsDeclared()
+    evidence_a = [] # No sc data
+    evidence_b = [
+        EvidenceItem(
+            obligation_id="S10.scope.properties",
+            verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
+            source="scope_sheet:search_console_properties", observed_at=datetime.now(timezone.utc),
+            detail="Declared properties.",
+            raw_metadata={"search_console_properties": ["example.com"]}
+        )
+    ]
+
+    findings = rule.reconcile(evidence_a, evidence_b)
+    assert len(findings) == 1
+    assert findings[0].outcome == "insufficient_data"

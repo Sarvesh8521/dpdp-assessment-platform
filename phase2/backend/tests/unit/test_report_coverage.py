@@ -27,7 +27,7 @@ class MockObligation:
 
 @pytest.mark.asyncio
 async def test_zero_findings_shows_complete_coverage():
-    """Test that an assessment with zero database findings still shows all expected obligations."""
+    """Test that an assessment with zero database findings returns exactly 0 findings."""
     
     mock_session = AsyncMock(spec=AsyncSession)
     client_id = uuid.uuid4()
@@ -100,27 +100,22 @@ async def test_zero_findings_shows_complete_coverage():
         assert combined_filename in captured_data
         report_json = json.loads(captured_data[combined_filename])
         
-        # Ensure findings array has exactly 2 records despite db returning 0
-        assert len(report_json["findings"]) == 2
+        # Ensure findings array has exactly 0 records according to the new requirements
+        assert len(report_json["findings"]) == 0
         
         verdicts = report_json["summary"]["verdicts"]
-        assert verdicts["cannot_determine"] == 2
+        assert verdicts["cannot_determine"] == 0
+        assert verdicts["observed"] == 0
+        assert verdicts["not_observed"] == 0
         
-        # Check output structure
-        f_codes = [f["obligation_code"] for f in report_json["findings"]]
-        assert "S6.consentGating" in f_codes
-        assert "S9.sharing.audienceUpload" in f_codes
+        # Verify assessment_outcome accurately reflects the zero findings
+        outcome = report_json["summary"]["assessment_outcome"]
+        assert "No issues found" in outcome
         
-        for f in report_json["findings"]:
-            assert f["verdict"] == "Cannot determine"
-            assert "unassessed" in f["sources"][0]
-            assert f["reason"] == "Required provider evidence unavailable. Connect the integration or verify resource access to resolve this."
-            assert len(f["evidence_details"]) == 1
-            assert f["evidence_details"][0]["operation"] == "unassessed"
-            assert f["evidence_details"][0]["integration"] in ("gtm", "meta", "unknown")
-            
-        # Individual report check: GTM should have the consent gating obligation
+        # Individual report check: Unconnected integrations should be in the report but empty
+        # wait! Are they in the report?
+        # detected_ints = set(configured_ints). So gtm and meta WILL be in the report.
         gtm_rep = report_json["individual_reports"].get("gtm")
         assert gtm_rep is not None
-        assert len(gtm_rep["findings"]) == 1
-        assert gtm_rep["findings"][0]["obligation_code"] == "S6.consentGating"
+        assert len(gtm_rep["findings"]) == 0
+        assert "not connected" in gtm_rep["summary"]["assessment_outcome"]

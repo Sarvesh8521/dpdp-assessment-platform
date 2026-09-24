@@ -22,3 +22,11 @@ celery_app.conf.update(
     task_track_started=True,
     task_time_limit=3600,  # 1 hour max per task
 )
+
+# Configure Celery Beat schedule
+celery_app.conf.beat_schedule = {
+    "daily-retention-purge": {
+        "task": "run_daily_retention_purge",
+        "schedule": 86400.0, # Run daily (every 24 hours). Using a simple interval for testing/consistency, or can use crontab.
+    },
+}

@@ -106,7 +106,7 @@ class AuditedHTTPClient:
         obligations_served: list[str] | None = None,
         client_id: str | None = None,
         assessment_id: str | None = None,
-        audit_callback: Any | None = None,
+        audit_callback: Any,
     ) -> None:
         settings = get_settings()
 
@@ -157,7 +157,13 @@ class AuditedHTTPClient:
         """Check if an endpoint is in the forbidden list."""
         endpoint_no_query = endpoint.split("?")[0]
         for forbidden in self._forbidden_endpoints:
-            if forbidden.endswith("$"):
+            if forbidden.startswith("^") and forbidden.endswith("$"):
+                if endpoint_no_query == forbidden[1:-1]:
+                    raise ForbiddenEndpointError(endpoint, provider=self._provider)
+            elif forbidden.startswith("^"):
+                if endpoint_no_query.startswith(forbidden[1:]):
+                    raise ForbiddenEndpointError(endpoint, provider=self._provider)
+            elif forbidden.endswith("$"):
                 if endpoint_no_query.endswith(forbidden[:-1]):
                     raise ForbiddenEndpointError(endpoint, provider=self._provider)
             else:
@@ -200,25 +206,35 @@ class AuditedHTTPClient:
         operation: str = "",
     ) -> dict[str, Any]:
         """Execute an HTTP request with full safety controls."""
-        # Security checks
-        self._validate_url(endpoint)
-        self._check_forbidden(endpoint)
-
-        # HARD RULE: Never perform write operations
-        if method.upper() in ("POST", "PUT", "PATCH", "DELETE"):
-            # Only allow POST for OAuth token exchange, not for data modification
-            if "oauth" not in endpoint.lower() and "token" not in endpoint.lower() and "searchstream" not in endpoint.lower() and "googleads" not in endpoint.lower():
-                raise ExternalAPIError(
-                    f"Write operation {method} is forbidden",
-                    provider=self._provider,
-                )
-
         start_time = time.monotonic()
         status_code = None
         error_detail = None
         status = "success"
 
+        # Security check: MUST have audit context to proceed
+        if not self._audit_callback:
+            raise ExternalAPIError("SECURITY VIOLATION: Missing audit callback", provider=self._provider)
+        if not self._client_id:
+            raise ExternalAPIError("SECURITY VIOLATION: Missing audit context (client_id)", provider=self._provider)
+        if self._assessment_id is None and not any(x in operation.lower() or x in endpoint.lower() for x in ("oauth", "token", "health", "fetch", "list", "validate")):
+            raise ExternalAPIError("SECURITY VIOLATION: Missing audit context (assessment_id)", provider=self._provider)
+        if not self._obligations_served:
+            raise ExternalAPIError("SECURITY VIOLATION: Missing audit context (obligations_served)", provider=self._provider)
+
         try:
+            # Security checks
+            self._validate_url(endpoint)
+            self._check_forbidden(endpoint)
+            
+            # HARD RULE: Never perform write operations
+            if method.upper() in ("POST", "PUT", "PATCH", "DELETE"):
+                # Only allow POST for OAuth token exchange, not for data modification
+                if "oauth" not in endpoint.lower() and "token" not in endpoint.lower() and "searchstream" not in endpoint.lower() and "googleads" not in endpoint.lower():
+                    raise ExternalAPIError(
+                        f"Write operation {method} is forbidden",
+                        provider=self._provider,
+                    )
+
             response = await self._execute_with_retry(
                 method, endpoint, params=params, json_body=json_body, data=data, headers=headers
             )
@@ -262,8 +278,13 @@ class AuditedHTTPClient:
         except httpx.HTTPError as exc:
             status = "error"
             error_detail = str(exc)
+            if hasattr(exc, "response") and exc.response is not None:
+                try:
+                    error_detail += f" - Response: {exc.response.text}"
+                except Exception:
+                    pass
             raise ExternalAPIError(
-                f"HTTP error: {exc}", provider=self._provider
+                f"HTTP error: {error_detail}", provider=self._provider
             ) from exc
         finally:
             duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -279,24 +300,20 @@ class AuditedHTTPClient:
             }
             self._call_log.append(call_record)
 
-            # Audit callback
-            if self._audit_callback:
-                try:
-                    await self._audit_callback(
-                        client_id=self._client_id,
-                        assessment_id=self._assessment_id,
-                        actor=f"adapter:{self._provider}",
-                        integration=self._provider,
-                        operation=operation or f"{method} {endpoint}",
-                        endpoint=endpoint,
-                        status=status,
-                        status_code=status_code,
-                        duration_ms=duration_ms,
-                        obligations_served=self._obligations_served,
-                        error_detail=error_detail,
-                    )
-                except Exception as audit_exc:
-                    logger.error("audit_callback_failed", error=str(audit_exc))
+            # Audit callback (failure will intentionally bubble up and fail the request, replacing any other exception)
+            await self._audit_callback(
+                client_id=self._client_id,
+                assessment_id=self._assessment_id,
+                actor=f"adapter:{self._provider}",
+                integration=self._provider,
+                operation=operation or f"{method} {endpoint}",
+                endpoint=endpoint,
+                status=status,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                obligations_served=self._obligations_served,
+                error_detail=error_detail,
+            )
 
     async def download_file(
         self,
@@ -306,15 +323,25 @@ class AuditedHTTPClient:
         operation: str = "",
     ) -> None:
         """Download a file with safety limits and audit logging."""
-        self._validate_url(endpoint)
-        self._check_forbidden(endpoint)
-        
         start_time = time.monotonic()
         status_code = None
         error_detail = None
         status = "success"
         
+        # Security check: MUST have audit context to proceed
+        if not self._audit_callback:
+            raise ExternalAPIError("SECURITY VIOLATION: Missing audit callback", provider=self._provider)
+        if not self._client_id:
+            raise ExternalAPIError("SECURITY VIOLATION: Missing audit context (client_id)", provider=self._provider)
+        if not self._assessment_id:
+            raise ExternalAPIError("SECURITY VIOLATION: Missing audit context (assessment_id)", provider=self._provider)
+        if not self._obligations_served:
+            raise ExternalAPIError("SECURITY VIOLATION: Missing audit context (obligations_served)", provider=self._provider)
+
         try:
+            self._validate_url(endpoint)
+            self._check_forbidden(endpoint)
+            
             async with self._client.stream("GET", endpoint, follow_redirects=True) as response:
                 status_code = response.status_code
                 
@@ -367,23 +394,20 @@ class AuditedHTTPClient:
             }
             self._call_log.append(call_record)
 
-            if self._audit_callback:
-                try:
-                    await self._audit_callback(
-                        client_id=self._client_id,
-                        assessment_id=self._assessment_id,
-                        actor=f"adapter:{self._provider}",
-                        integration=self._provider,
-                        operation=operation or f"DOWNLOAD {endpoint}",
-                        endpoint=endpoint,
-                        status=status,
-                        status_code=status_code,
-                        duration_ms=duration_ms,
-                        obligations_served=self._obligations_served,
-                        error_detail=error_detail,
-                    )
-                except Exception as audit_exc:
-                    logger.error("audit_callback_failed", error=str(audit_exc))
+            # Audit callback (failure bubbles up)
+            await self._audit_callback(
+                client_id=self._client_id,
+                assessment_id=self._assessment_id,
+                actor=f"adapter:{self._provider}",
+                integration=self._provider,
+                operation=operation or f"DOWNLOAD {endpoint}",
+                endpoint=endpoint,
+                status=status,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                obligations_served=self._obligations_served,
+                error_detail=error_detail,
+            )
 
     async def _execute_with_retry(
         self,

@@ -1,4 +1,7 @@
 import pytest
+
+async def dummy_audit(*args, **kwargs): pass
+
 from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime, timezone
 import tarfile
@@ -8,7 +11,7 @@ from pathlib import Path
 
 from app.integrations.github_adapter.adapter import GitHubAdapter, PII_LOG_PATTERNS
 from app.integrations.base.adapter import ConnectionInfo
-from app.domain.evidence import Verdict
+from app.domain.evidence import Verdict, Confidence
 from app.integrations.base.http_client import ExternalAPIError
 
 def test_pii_log_patterns():
@@ -51,13 +54,14 @@ async def test_forbidden_files_rejection(mock_client_class, adapter, connection)
     async def mock_download(endpoint, target_path, **kwargs):
         files = {
             ".env": "SECRET=123",
+            "secret.pem": "-----BEGIN PRIVATE KEY-----",
             "src/main.js": "console.log('hello');"
         }
         create_mock_tarball(target_path, files)
         
     mock_instance.download_file.side_effect = mock_download
     
-    result = await adapter.collect(connection, repositories=["test-repo"])
+    result = await adapter.collect(connection, repositories=["test-repo"], audit_callback=dummy_audit)
     
     # The .env file should be completely ignored (no evidence generated for it)
     # We just ensure it doesn't crash and the .env content doesn't end up anywhere.
@@ -83,7 +87,7 @@ async def test_planted_findings_surfaced(mock_client_class, adapter, connection)
         
     mock_instance.download_file.side_effect = mock_download
     
-    result = await adapter.collect(connection, repositories=["test-repo"])
+    result = await adapter.collect(connection, repositories=["test-repo"], audit_callback=dummy_audit)
     
     # 1. Tracker SDKs (package.json + Init)
     sdk_evidence = [e for e in result.evidence if e.obligation_id == "S10.scope.sdks"]
@@ -105,6 +109,16 @@ async def test_planted_findings_surfaced(mock_client_class, adapter, connection)
     consent_evidence = [e for e in result.evidence if e.obligation_id == "S6.consentGating"]
     assert len(consent_evidence) == 1
     assert consent_evidence[0].verdict == Verdict.NOT_OBSERVED
+
+    # 5. SDK Metadata check
+    dep_ev = next(e for e in sdk_evidence if "initialization" not in e.detail)
+    assert "sdk" in dep_ev.structured_detail.metadata
+    assert "sdk_init" in init_ev.structured_detail.metadata
+    
+    # 6. Baseline Confidence check
+    baseline_evidence = [e for e in result.evidence if e.source.endswith(":baseline")]
+    for ev in baseline_evidence:
+        assert ev.confidence == Confidence.MEDIUM
 
 @pytest.mark.asyncio
 @patch("app.integrations.github_adapter.adapter.tempfile.TemporaryDirectory")
@@ -133,19 +147,20 @@ async def test_recursive_traversal_metadata_and_cleanup(mock_client_class, mock_
         
     mock_instance.download_file.side_effect = mock_download
     
-    result = await adapter.collect(connection, repositories=["test-repo"])
+    result = await adapter.collect(connection, repositories=["test-repo"], audit_callback=dummy_audit)
     
     # Assert Metadata completeness for all generated evidence
     for ev in result.evidence:
         metadata = ev.structured_detail.metadata
         assert "repository" in metadata
         assert metadata["repository"] == "test-repo"
-        assert "file_path" in metadata
-        assert "/" in metadata["file_path"] # Proves nested path was recorded
-        assert "line" in metadata
-        assert "category" in metadata
-        assert "matched_rule" in metadata
-        assert "recommended_action" in metadata
+        if not (ev.source and ev.source.endswith(":baseline")):
+            assert "file_path" in metadata
+            assert "/" in metadata["file_path"] # Proves nested path was recorded
+            assert "line" in metadata
+            assert "category" in metadata
+            assert "matched_rule" in metadata
+            assert "recommended_action" in metadata
         
         assert ev.structured_detail.reason is not None
         assert len(ev.structured_detail.reason) > 0

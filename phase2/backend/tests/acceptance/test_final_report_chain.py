@@ -12,6 +12,9 @@ import json
 import os
 import uuid
 import pytest
+
+async def dummy_audit(*args, **kwargs): pass
+
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -173,7 +176,7 @@ async def test_complete_report_chain(mock_external_apis, tmp_path):
         # Mock the token resolution to return fake tokens instead of looking up Secret Manager
         with patch.object(AssessmentService, "_resolve_access_token", new_callable=AsyncMock) as mock_resolve:
             mock_resolve.return_value = ("fake_token_for_test", None)
-            # This orchestrates adapter.collect() and finding generation
+            # This orchestrates adapter.collect(audit_callback=dummy_audit) and finding generation
             assessment = await service.create_assessment(data, user_id)
     
             # Ensure we have findings

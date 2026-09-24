@@ -68,8 +68,7 @@ def test_rule4_ads_match_vs_consent():
 
 def test_rule5_github_sdks_vs_declared():
     rule = GitHubSDKsVsDeclared()
-    
-    github_evidence = [create_evidence("github", Verdict.OBSERVED, "S10.scope.sdks", raw_metadata={"sdks": [{"sdk": "react-native-fbsdk-next"}]})]
+    github_evidence = [create_evidence("github", Verdict.OBSERVED, "S10.scope.sdks", raw_metadata={"sdk": "react-native-fbsdk-next"})]
     
     findings = rule.reconcile(github_evidence, [])
     assert len(findings) == 1

@@ -1,151 +1,158 @@
-import pytest
 import uuid
-import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException
 
 from app.db.models.client import Client
 from app.db.models.connection import Connection, ConnectionStatus
+from app.api.v1.integrations import _get_capped_expires_at, _require_active_engagement
 from app.services.assessment_service import AssessmentService
-from app.api.v1.integrations import _get_capped_expires_at
 
-
-@pytest.mark.asyncio
-async def test_get_capped_expires_at_no_client():
-    session = AsyncMock()
-    session.get.return_value = None
-    res = await _get_capped_expires_at(session, uuid.uuid4())
-    assert res is None
-
+@pytest.fixture
+def mock_session():
+    session = AsyncMock(spec=AsyncSession)
+    return session
 
 @pytest.mark.asyncio
-async def test_get_capped_expires_at_active_engagement():
-    session = AsyncMock()
-    client = Client(engagement_end=datetime.now(timezone.utc) + timedelta(days=30))
-    session.get.return_value = client
-
-    # Token expires in 1 hr (3600s), engagement is 30 days. Should be token expiry.
-    res = await _get_capped_expires_at(session, uuid.uuid4(), 3600)
-    assert res < client.engagement_end
-    
-    # Token has no expiry, should be capped at engagement end
-    res2 = await _get_capped_expires_at(session, uuid.uuid4(), None)
-    assert res2 == client.engagement_end
-
-
-@pytest.mark.asyncio
-async def test_get_capped_expires_at_expired_engagement():
-    session = AsyncMock()
-    # Engagement ended yesterday
-    client = Client(engagement_end=datetime.now(timezone.utc) - timedelta(days=1))
-    session.get.return_value = client
-
-    # Token expires in 30 days. Should be capped at yesterday.
-    res = await _get_capped_expires_at(session, uuid.uuid4(), 30 * 86400)
-    assert res == client.engagement_end
-
-
-@pytest.mark.asyncio
-async def test_resolve_access_token_refresh_capped():
-    session = AsyncMock()
+async def test_get_capped_expires_at_token_expires_before_engagement(mock_session):
     client_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
     
-    # Engagement ends in 5 minutes
-    engagement_end = datetime.now(timezone.utc) + timedelta(minutes=5)
-    client_mock = Client(id=client_id, engagement_end=engagement_end)
-    session.get.return_value = client_mock
+    mock_client = Client(id=client_id, engagement_end=now + timedelta(days=10))
+    mock_session.get.return_value = mock_client
     
-    db_conn = Connection(client_id=client_id, provider="google_ads", secret_ref="ref1")
+    # Token expires in 1 day
+    expires_at = await _get_capped_expires_at(mock_session, client_id, token_expires_in=86400)
     
-    service = AssessmentService(session=session, client_id=client_id)
-    
-    # Mock SecretManager
-    with patch("app.services.assessment_service.get_secret_manager") as mock_sm_factory:
-        mock_sm = AsyncMock()
-        mock_sm_factory.return_value = mock_sm
-        
-        old_token = {
-            "access_token": "expired_token",
-            "refresh_token": "rt",
-            "obtained_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
-            "expires_in": 3600
-        }
-        mock_sm.get_secret.return_value = json.dumps(old_token)
-        
-        # Mock OAuthHandler
-        with patch("app.api.v1.oauth_handlers.GoogleOAuthHandler.refresh_access_token") as mock_refresh:
-            mock_refresh.return_value = {
-                "access_token": "new_token",
-                "expires_in": 3600 # 1 hour
-            }
-            
-            access_token, err = await service._resolve_access_token(db_conn, "google_ads")
-            
-            assert access_token == "new_token"
-            assert err is None
-            assert mock_refresh.called
-            # Verify DB connection expires_at was capped to engagement end
-            assert db_conn.expires_at == engagement_end
-
+    assert expires_at is not None
+    # Difference should be roughly 1 day
+    delta = expires_at - now
+    assert timedelta(hours=23) < delta < timedelta(hours=25)
 
 @pytest.mark.asyncio
-async def test_run_assessment_task_engagement_expired():
-    # If engagement expired -> access blocked, connection marked expired, Cannot determine returned
-    session = AsyncMock()
+async def test_get_capped_expires_at_engagement_ends_before_token(mock_session):
     client_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
     
-    # Expired 1 day ago
-    client_mock = Client(id=client_id, engagement_end=datetime.now(timezone.utc) - timedelta(days=1))
+    engagement_end = now + timedelta(days=1)
+    mock_client = Client(id=client_id, engagement_end=engagement_end)
+    mock_session.get.return_value = mock_client
     
-    db_conn = Connection(client_id=client_id, provider="dummy", status=ConnectionStatus.CONNECTED)
+    # Token expires in 10 days
+    expires_at = await _get_capped_expires_at(mock_session, client_id, token_expires_in=864000)
     
-    # Provide the mock db_conn
-    mock_result = AsyncMock()
-    mock_result.scalars.return_value.first.return_value = db_conn
-    session.execute.return_value = mock_result
-    
-    # Provide the client
-    session.get.return_value = client_mock
-    
-    service = AssessmentService(session=session, client_id=client_id)
-    
-    with patch("app.services.assessment_service.get_adapter") as mock_get_adapter:
-        mock_adapter = AsyncMock()
-        mock_adapter.provider = "dummy"
-        mock_adapter.id = "dummy"
-        mock_get_adapter.return_value = mock_adapter
-        
-        # Mock resolve access token so we can ensure it's NEVER called
-        with patch.object(service, "_resolve_access_token") as mock_resolve:
-            # We call the private method, wait, the loop requires obligations
-            # We can't easily mock the huge while loop without lots of boilerplate.
-            # But the logic is in run_assessment_task. Let's just trust that the previous tests cover the logic, or we write a smaller test for the loop snippet.
-            pass
-
+    assert expires_at == engagement_end
 
 @pytest.mark.asyncio
-async def test_isolation_between_clients():
-    """Verify one client's expiry cannot affect another client"""
-    session = AsyncMock()
-    client_1_id = uuid.uuid4()
-    client_2_id = uuid.uuid4()
+async def test_get_capped_expires_at_no_token_expiry(mock_session):
+    client_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
     
-    # Client 1 expired
-    client_1 = Client(id=client_1_id, engagement_end=datetime.now(timezone.utc) - timedelta(days=1))
-    # Client 2 active
-    client_2 = Client(id=client_2_id, engagement_end=datetime.now(timezone.utc) + timedelta(days=30))
+    engagement_end = now + timedelta(days=1)
+    mock_client = Client(id=client_id, engagement_end=engagement_end)
+    mock_session.get.return_value = mock_client
     
-    async def mock_get(model, id):
-        if id == client_1_id: return client_1
-        if id == client_2_id: return client_2
-        return None
+    expires_at = await _get_capped_expires_at(mock_session, client_id, token_expires_in=None)
+    
+    assert expires_at == engagement_end
+
+@pytest.mark.asyncio
+async def test_require_active_engagement_blocks_expired(mock_session):
+    client_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    
+    # Engagement ended 1 day ago
+    mock_client = Client(id=client_id, engagement_end=now - timedelta(days=1))
+    mock_session.get.return_value = mock_client
+    
+    with pytest.raises(HTTPException) as exc_info:
+        await _require_active_engagement(mock_session, client_id)
+    
+    assert exc_info.value.status_code == 403
+    assert "engagement period has ended" in exc_info.value.detail
+
+@pytest.mark.asyncio
+async def test_require_active_engagement_allows_active(mock_session):
+    client_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    
+    # Engagement ends in 1 day
+    mock_client = Client(id=client_id, engagement_end=now + timedelta(days=1))
+    mock_session.get.return_value = mock_client
+    
+    # Should not raise exception
+    await _require_active_engagement(mock_session, client_id)
+
+@pytest.mark.asyncio
+async def test_refresh_connection_blocks_after_engagement(mock_session):
+    client_id = uuid.uuid4()
+    assessment_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    
+    mock_client = Client(id=client_id, engagement_end=now - timedelta(days=1))
+    mock_session.get.return_value = mock_client
+    
+    service = AssessmentService(mock_session, client_id)
+    service.assessment_id = assessment_id
+    
+    # Mock token that is expired
+    expired_obtained_at = (now - timedelta(hours=2)).isoformat()
+    secret_str = f'{{"access_token": "expired", "refresh_token": "refresh", "obtained_at": "{expired_obtained_at}", "expires_in": 3600}}'
+    
+    with patch('app.services.assessment_service.get_secret_manager') as mock_sm:
+        mock_manager = AsyncMock()
+        mock_manager.get_secret.return_value = secret_str
+        mock_sm.return_value = mock_manager
+
+        db_conn = Connection(
+            id=uuid.uuid4(),
+            client_id=client_id,
+            provider="gtm",
+            secret_ref="mock_ref",
+            status=ConnectionStatus.CONNECTED
+        )
         
-    session.get = mock_get
+        with patch("app.api.v1.oauth_handlers.GoogleOAuthHandler") as mock_handler_class:
+            mock_handler = AsyncMock()
+            mock_handler_class.return_value = mock_handler
+            
+            token, err = await service._resolve_access_token(db_conn, "gtm")
+            
+            assert token == ""
+            assert err == "Access expired — engagement period ended"
+            assert db_conn.status == ConnectionStatus.EXPIRED
+            mock_session.commit.assert_called()
+            mock_handler.refresh_access_token.assert_not_called()
+            mock_manager.revoke_secret.assert_called_once_with(str(client_id), "mock_ref")
+
+@pytest.mark.asyncio
+async def test_enforce_engagement_expiry_revokes_secret(mock_session):
+    from app.api.v1.integrations import _enforce_engagement_expiry
     
-    # Client 1 token cap
-    res1 = await _get_capped_expires_at(session, client_1_id, 3600)
-    assert res1 == client_1.engagement_end
+    client_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    mock_client = Client(id=client_id, engagement_end=now - timedelta(days=1))
+    mock_session.get.return_value = mock_client
     
-    # Client 2 token cap
-    res2 = await _get_capped_expires_at(session, client_2_id, 3600)
-    assert res2 < client_2.engagement_end
+    connection = Connection(
+        id=uuid.uuid4(),
+        client_id=client_id,
+        provider="github",
+        secret_ref="test_secret",
+        status=ConnectionStatus.CONNECTED
+    )
+    
+    with patch('app.api.v1.integrations.get_secret_manager') as mock_sm:
+        mock_manager = AsyncMock()
+        mock_sm.return_value = mock_manager
+        
+        result = await _enforce_engagement_expiry(mock_session, connection)
+        
+        assert result is True
+        assert connection.status == ConnectionStatus.EXPIRED
+        assert connection.revoked_at is not None
+        mock_manager.revoke_secret.assert_called_once_with(str(client_id), "test_secret")
+        mock_session.commit.assert_called_once()

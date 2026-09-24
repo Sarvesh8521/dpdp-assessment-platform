@@ -8,11 +8,15 @@ import httpx
 @pytest.mark.asyncio
 async def test_otp_and_password_endpoints():
     base_url = "http://localhost:8001/api/v1/auth"
-    test_email = "authtest_runner@example.com"
+    test_email = "sarvesh8521@gmail.com"
 
     async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as client:
         # 1. Send Login OTP
-        resp = await client.post("/otp/send-login", json={"email": test_email})
+        try:
+            resp = await client.post("/otp/send-login", json={"email": test_email})
+        except httpx.RequestError:
+            pytest.skip("Local server is not running on port 8001. Skipping integration test.")
+            
         assert resp.status_code in (200, 429), resp.text
         if resp.status_code == 200:
             assert "Verification code sent" in resp.json()["message"]

@@ -1,0 +1,35 @@
+{
+  "integration": "gtm",
+  "title": "Google Tag Manager Assessment Report",
+  "integration_name": "Google Tag Manager",
+  "assessment_id": "07beea63-6c8c-4bc4-9bb4-828b6908db58",
+  "client_id": "57e7ee13-91f1-4cfa-aaec-a4c45338e7f8",
+  "generated_at": "2026-09-23T11:16:19.480098+00:00",
+  "connection_metadata": {
+    "provider": "gtm",
+    "resource_name": null,
+    "connected_at": null
+  },
+  "summary": {
+    "total_findings": 0,
+    "override_metrics": {
+      "total_actual_findings": 0,
+      "overridden_count": 0,
+      "override_rate": 0.0,
+      "health_warning": false
+    },
+    "high_severity": 0,
+    "medium_severity": 0,
+    "low_severity": 0,
+    "verdicts": {
+      "observed": 0,
+      "not_observed": 0,
+      "cannot_determine": 0
+    },
+    "requires_human_review": 0,
+    "assessment_outcome": "Integration not connected; no provider evidence collected."
+  },
+  "findings": [],
+  "issues": [],
+  "evaluated_obligations": []
+}

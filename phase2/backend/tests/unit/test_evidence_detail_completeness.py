@@ -13,14 +13,16 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+async def dummy_audit(*args, **kwargs): pass
+
 from pydantic import ValidationError
 
 from app.domain.evidence import (
     Confidence,
     EvidenceItem,
     StructuredEvidence,
-    Verdict,
-)
+    Verdict)
 
 
 # ─────────────────────────────────────────────────
@@ -38,8 +40,7 @@ class TestStructuredEvidenceRequiredFields:
             operation="test_op",
             resource_type="widget",
             observed_at=datetime.now(timezone.utc),
-            detail="A valid detail.",
-        )
+            detail="A valid detail.")
         assert se.operation == "test_op"
         assert se.resource_type == "widget"
 
@@ -51,8 +52,7 @@ class TestStructuredEvidenceRequiredFields:
                 # operation missing
                 resource_type="widget",
                 observed_at=datetime.now(timezone.utc),
-                detail="detail",
-            )
+                detail="detail")
 
     def test_missing_resource_type_raises(self):
         with pytest.raises(ValidationError, match="resource_type"):
@@ -62,8 +62,7 @@ class TestStructuredEvidenceRequiredFields:
                 operation="op",
                 # resource_type missing
                 observed_at=datetime.now(timezone.utc),
-                detail="detail",
-            )
+                detail="detail")
 
     def test_missing_observed_at_raises(self):
         with pytest.raises(ValidationError, match="observed_at"):
@@ -73,8 +72,7 @@ class TestStructuredEvidenceRequiredFields:
                 operation="op",
                 resource_type="widget",
                 # observed_at missing
-                detail="detail",
-            )
+                detail="detail")
 
     def test_missing_detail_raises(self):
         with pytest.raises(ValidationError, match="detail"):
@@ -94,8 +92,7 @@ class TestStructuredEvidenceRequiredFields:
             operation="op",
             resource_type="widget",
             observed_at=datetime.now(timezone.utc),
-            detail="detail",
-        )
+            detail="detail")
         assert se.finding_id is None
 
     def test_finding_id_settable(self):
@@ -107,8 +104,7 @@ class TestStructuredEvidenceRequiredFields:
             resource_type="widget",
             observed_at=datetime.now(timezone.utc),
             detail="detail",
-            finding_id=fid,
-        )
+            finding_id=fid)
         assert se.finding_id == fid
 
 
@@ -132,8 +128,7 @@ class TestMetadataPIIRejection:
                 resource_type="widget",
                 observed_at=datetime.now(timezone.utc),
                 detail="detail",
-                metadata={bad_key: "value"},
-            )
+                metadata={bad_key: "value"})
 
     def test_safe_metadata_allowed(self):
         se = StructuredEvidence(
@@ -143,8 +138,7 @@ class TestMetadataPIIRejection:
             resource_type="widget",
             observed_at=datetime.now(timezone.utc),
             detail="detail",
-            metadata={"container": "GTM-XXXX", "total_tags": 5},
-        )
+            metadata={"container": "GTM-XXXX", "total_tags": 5})
         assert se.metadata["container"] == "GTM-XXXX"
 
     def test_none_metadata_allowed(self):
@@ -155,8 +149,7 @@ class TestMetadataPIIRejection:
             resource_type="widget",
             observed_at=datetime.now(timezone.utc),
             detail="detail",
-            metadata=None,
-        )
+            metadata=None)
         assert se.metadata is None
 
 
@@ -229,7 +222,7 @@ async def test_gtm_evidence_completeness(mock_client_class):
 
     mock_instance.get.side_effect = mock_get
 
-    result = await adapter.collect(connection)
+    result = await adapter.collect(connection, audit_callback=AsyncMock())
     assert_evidence_complete(result.evidence, "GTM")
 
 
@@ -245,7 +238,7 @@ async def test_ga4_evidence_completeness(mock_client_class):
     from app.integrations.base.adapter import ConnectionInfo
 
     adapter = GA4Adapter()
-    connection = ConnectionInfo(provider="ga4", scopes=["read"], connected_at=datetime.now(timezone.utc))
+    connection = ConnectionInfo(provider="ga4", scopes=["read"], connected_at=datetime.now(timezone.utc), metadata={"resource_id": "properties/123", "resource_name": "Test Prop"})
 
     mock_instance = mock_client_class.return_value
     mock_instance.get = AsyncMock()
@@ -268,7 +261,7 @@ async def test_ga4_evidence_completeness(mock_client_class):
 
     mock_instance.get.side_effect = mock_get
 
-    result = await adapter.collect(connection)
+    result = await adapter.collect(connection, audit_callback=AsyncMock())
     assert_evidence_complete(result.evidence, "GA4")
 
 
@@ -287,8 +280,7 @@ async def test_google_ads_evidence_completeness(mock_client_class):
     connection = ConnectionInfo(
         provider="google_ads", scopes=["adwords"],
         connected_at=datetime.now(timezone.utc),
-        metadata={"developer_token": "test"},
-    )
+        metadata={"developer_token": "test"})
 
     mock_instance = mock_client_class.return_value
     mock_instance.close = AsyncMock()
@@ -307,7 +299,7 @@ async def test_google_ads_evidence_completeness(mock_client_class):
 
     mock_instance.post = AsyncMock(side_effect=mock_post)
 
-    result = await adapter.collect(connection, customer_id="12345")
+    result = await adapter.collect(connection, audit_callback=AsyncMock(), customer_id="12345")
     assert_evidence_complete(result.evidence, "Google Ads")
 
 
@@ -326,8 +318,7 @@ async def test_search_console_evidence_completeness(mock_client_class):
     connection = ConnectionInfo(
         provider="search_console", scopes=["read"],
         connected_at=datetime.now(timezone.utc),
-        metadata={"resource_id": "https://example.com"},
-    )
+        metadata={"resource_id": "https://example.com"})
 
     mock_instance = mock_client_class.return_value
     mock_instance.get = AsyncMock()
@@ -342,7 +333,7 @@ async def test_search_console_evidence_completeness(mock_client_class):
 
     mock_instance.get.side_effect = mock_get
 
-    result = await adapter.collect(connection)
+    result = await adapter.collect(connection, audit_callback=AsyncMock())
     assert_evidence_complete(result.evidence, "Search Console")
 
 
@@ -361,8 +352,7 @@ async def test_meta_evidence_completeness(mock_client_class):
     connection = ConnectionInfo(
         provider="meta", scopes=["ads_read"],
         connected_at=datetime.now(timezone.utc),
-        metadata={"business_id": "biz123", "ad_account_id": "act_456"},
-    )
+        metadata={"business_id": "biz123", "ad_account_id": "act_456"})
 
     mock_instance = mock_client_class.return_value
     mock_instance.get = AsyncMock()
@@ -383,7 +373,7 @@ async def test_meta_evidence_completeness(mock_client_class):
 
     mock_instance.get.side_effect = mock_get
 
-    result = await adapter.collect(connection, ad_account_id="act_456")
+    result = await adapter.collect(connection, audit_callback=AsyncMock(), ad_account_id="act_456")
     assert_evidence_complete(result.evidence, "Meta")
 
 
@@ -415,8 +405,7 @@ async def test_github_evidence_completeness(mock_client_class):
     adapter = GitHubAdapter()
     connection = ConnectionInfo(
         provider="github", scopes=["contents:read"],
-        connected_at=datetime.now(timezone.utc),
-    )
+        connected_at=datetime.now(timezone.utc))
 
     mock_instance = mock_client_class.return_value
     mock_instance.download_file = AsyncMock()
@@ -432,7 +421,7 @@ async def test_github_evidence_completeness(mock_client_class):
 
     mock_instance.download_file.side_effect = mock_download
 
-    result = await adapter.collect(connection, repositories=["test/repo"])
+    result = await adapter.collect(connection, audit_callback=AsyncMock(), repositories=["test/repo"])
 
     # Verify all evidence items have resource_id
     for ev in result.evidence:
@@ -458,8 +447,7 @@ async def test_cmp_onetrust_evidence_completeness(mock_client_class):
     adapter = OneTrustAdapter()
     connection = ConnectionInfo(
         provider="onetrust", scopes=["onetrust:read"],
-        connected_at=datetime.now(timezone.utc),
-    )
+        connected_at=datetime.now(timezone.utc))
 
     mock_instance = mock_client_class.return_value
     mock_instance.get = AsyncMock()
@@ -482,7 +470,7 @@ async def test_cmp_onetrust_evidence_completeness(mock_client_class):
 
     mock_instance.get.side_effect = mock_get
 
-    result = await adapter.collect(connection)
+    result = await adapter.collect(connection, audit_callback=AsyncMock())
     assert_evidence_complete(result.evidence, "CMP (OneTrust)")
 
 
@@ -494,10 +482,9 @@ async def test_cmp_cookieyes_evidence_completeness():
     adapter = CookieYesAdapter()
     connection = ConnectionInfo(
         provider="cookieyes", scopes=["cookieyes:read"],
-        connected_at=datetime.now(timezone.utc),
-    )
+        connected_at=datetime.now(timezone.utc))
 
-    result = await adapter.collect(connection)
+    result = await adapter.collect(connection, audit_callback=AsyncMock())
     assert_evidence_complete(result.evidence, "CMP (CookieYes)")
 
 
@@ -509,10 +496,9 @@ async def test_cmp_securiti_evidence_completeness():
     adapter = SecuritiAdapter()
     connection = ConnectionInfo(
         provider="securiti", scopes=["securiti:read"],
-        connected_at=datetime.now(timezone.utc),
-    )
+        connected_at=datetime.now(timezone.utc))
 
-    result = await adapter.collect(connection)
+    result = await adapter.collect(connection, audit_callback=AsyncMock())
     assert_evidence_complete(result.evidence, "CMP (Securiti)")
 
 
@@ -557,15 +543,13 @@ async def test_finding_service_stamps_finding_id():
             "resource_name": "Tag One",
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "detail": "Tag detail",
-        },
-    )
+        })
 
     obligation = Obligation(
         id=obligation_id,
         code="S6.consentGating",
         title="Consent Gating",
-        severity=ObligationSeverity.HIGH,
-    )
+        severity=ObligationSeverity.HIGH)
 
     # Mock DB query results
     evidence_scalar = MagicMock()

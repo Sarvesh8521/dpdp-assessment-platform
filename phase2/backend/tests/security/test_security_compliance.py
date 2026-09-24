@@ -19,6 +19,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+async def dummy_audit(*args, **kwargs): pass
+
+
 from app.api.v1.oauth_handlers import OAuthError, validate_oauth_state
 from app.db.models.connection import Connection
 from app.db.models.oauth_state import OAuthState
@@ -141,8 +144,8 @@ async def test_forbidden_provider_endpoints_blocked():
         provider="ga4",
         base_url="https://analyticsadmin.googleapis.com",
         forbidden_endpoints=["/v1beta/properties/123/userActivity", "/v1beta/properties/123/reports"],
+        audit_callback=dummy_audit
     )
-
     with pytest.raises(ForbiddenEndpointError):
         await client.get("/v1beta/properties/123/userActivity")
 

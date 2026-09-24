@@ -1,4 +1,7 @@
 import pytest
+
+async def dummy_audit(*args, **kwargs): pass
+
 from app.integrations.base.http_client import AuditedHTTPClient, ForbiddenEndpointError
 
 # Import all adapters to verify they have forbidden endpoints
@@ -16,6 +19,7 @@ async def test_audited_http_client_blocks_forbidden():
         provider="test",
         base_url="https://api.github.com",
         forbidden_endpoints=["/delete", "/users/admin"],
+        audit_callback=dummy_audit
     )
     
     with pytest.raises(ForbiddenEndpointError) as exc:

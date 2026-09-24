@@ -103,8 +103,7 @@ def test_register_structural_validation_catches_missing_keys():
         # Missing 'title'
     ]
     errors = validate_obligation_register(bad_register)
-    assert len(errors) == 1
-    assert "missing required keys" in errors[0]
+    assert any("missing required keys" in e for e in errors)
 
 
 def test_register_structural_validation_catches_invalid_category():
@@ -118,8 +117,7 @@ def test_register_structural_validation_catches_invalid_category():
         }
     ]
     errors = validate_obligation_register(bad_register)
-    assert len(errors) == 1
-    assert "invalid category" in errors[0]
+    assert any("invalid category" in e for e in errors)
 
 
 def test_register_structural_validation_catches_invalid_severity():
@@ -133,8 +131,7 @@ def test_register_structural_validation_catches_invalid_severity():
         }
     ]
     errors = validate_obligation_register(bad_register)
-    assert len(errors) == 1
-    assert "invalid severity" in errors[0]
+    assert any("invalid severity" in e for e in errors)
 
 
 def test_register_structural_validation_catches_duplicates():
@@ -144,8 +141,7 @@ def test_register_structural_validation_catches_duplicates():
         {"code": "TEST.dup", "title": "B", "category": "consent", "severity": "high"},
     ]
     errors = validate_obligation_register(bad_register)
-    assert len(errors) == 1
-    assert "duplicate code" in errors[0]
+    assert any("duplicate code" in e for e in errors)
 
 
 def test_register_no_duplicate_codes():

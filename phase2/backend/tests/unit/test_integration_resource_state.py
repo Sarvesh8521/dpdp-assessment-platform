@@ -23,10 +23,7 @@ def _make_connection(
     provider: str,
     resource_id: str | None = None,
     resource_name: str | None = None,
-    account_email: str | None = None,
-    account_name: str | None = None,
-    status: ConnectionStatus = ConnectionStatus.CONNECTED,
-) -> Connection:
+    status: ConnectionStatus = ConnectionStatus.CONNECTED) -> Connection:
     """Create an in-memory Connection for testing."""
     conn = Connection(
         id=uuid.uuid4(),
@@ -37,12 +34,7 @@ def _make_connection(
         connected_at=datetime.now(timezone.utc),
         resource_id=resource_id,
         resource_name=resource_name,
-        provider_metadata={},
-    )
-    if account_email:
-        conn.provider_metadata["account_email"] = account_email
-    if account_name:
-        conn.provider_metadata["account_name"] = account_name
+        provider_metadata={})
     return conn
 
 
@@ -59,10 +51,7 @@ def _build_status_item(conn: Connection) -> IntegrationStatusItem:
         resource_name=conn.resource_name,
         resource_selected=has_resource,
         requires_resource_selection=conn.provider not in no_resource_providers,
-        account_email=meta.get("account_email"),
-        account_name=meta.get("account_name"),
-        connected_at=conn.connected_at,
-    )
+        connected_at=conn.connected_at)
 
 
 # ── 1. GTM with resource ──
@@ -72,16 +61,13 @@ def test_connected_gtm_has_resource():
     conn = _make_connection(
         provider="gtm",
         resource_id="GTM-ABC123",
-        resource_name="My Account / Main Container",
-        account_email="test@example.com",
-    )
+        resource_name="My Account / Main Container")
     item = _build_status_item(conn)
 
     assert item.resource_selected is True
     assert item.resource_id == "GTM-ABC123"
     assert item.resource_name == "My Account / Main Container"
     assert item.requires_resource_selection is True
-    assert item.account_email == "test@example.com"
     assert item.status == "connected"
 
 
@@ -92,16 +78,13 @@ def test_connected_ga4_has_resource():
     conn = _make_connection(
         provider="ga4",
         resource_id="123456789",
-        resource_name="My Site / Production Property",
-        account_email="analytics@corp.com",
-    )
+        resource_name="My Site / Production Property")
     item = _build_status_item(conn)
 
     assert item.resource_selected is True
     assert item.resource_id == "123456789"
     assert item.resource_name == "My Site / Production Property"
     assert item.requires_resource_selection is True
-    assert item.account_email == "analytics@corp.com"
 
 
 # ── 3. Google Ads with customer resource ──
@@ -111,9 +94,7 @@ def test_connected_google_ads_has_customer_resource():
     conn = _make_connection(
         provider="google_ads",
         resource_id="1234567890",
-        resource_name="Google Ads Account (123-456-7890)",
-        account_email="ads@corp.com",
-    )
+        resource_name="Google Ads Account (123-456-7890)")
     item = _build_status_item(conn)
 
     assert item.resource_selected is True
@@ -129,18 +110,13 @@ def test_connected_meta_has_business_resource():
     conn = _make_connection(
         provider="meta",
         resource_id="987654321",
-        resource_name="My Business Manager",
-        account_email="meta@corp.com",
-        account_name="Meta Business User",
-    )
+        resource_name="My Business Manager")
     item = _build_status_item(conn)
 
     assert item.resource_selected is True
     assert item.resource_id == "987654321"
     assert item.resource_name == "My Business Manager"
     assert item.requires_resource_selection is True
-    assert item.account_email == "meta@corp.com"
-    assert item.account_name == "Meta Business User"
 
 
 # ── 5. GitHub with repository resource ──
@@ -150,16 +126,13 @@ def test_connected_github_has_repository_resource():
     conn = _make_connection(
         provider="github",
         resource_id="myorg/my-repo",
-        resource_name="myorg/my-repo",
-        account_name="github-user",
-    )
+        resource_name="myorg/my-repo")
     item = _build_status_item(conn)
 
     assert item.resource_selected is True
     assert item.resource_id == "myorg/my-repo"
     assert item.resource_name == "myorg/my-repo"
     assert item.requires_resource_selection is True
-    assert item.account_name == "github-user"
 
 
 # ── 6. Search Console with property resource ──
@@ -169,16 +142,13 @@ def test_connected_search_console_has_property_resource():
     conn = _make_connection(
         provider="search_console",
         resource_id="https://example.com",
-        resource_name="https://example.com",
-        account_email="webmaster@corp.com",
-    )
+        resource_name="https://example.com")
     item = _build_status_item(conn)
 
     assert item.resource_selected is True
     assert item.resource_id == "https://example.com"
     assert item.resource_name == "https://example.com"
     assert item.requires_resource_selection is True
-    assert item.account_email == "webmaster@corp.com"
 
 
 # ── 7. Unselected resource is explicitly represented, NOT fake data ──
@@ -188,9 +158,7 @@ def test_unselected_resource_explicitly_represented():
     conn = _make_connection(
         provider="ga4",
         resource_id=None,
-        resource_name=None,
-        account_email="test@example.com",
-    )
+        resource_name=None)
     item = _build_status_item(conn)
 
     # Status item shows None resource — not a fake sentinel
@@ -198,7 +166,6 @@ def test_unselected_resource_explicitly_represented():
     assert item.resource_id is None
     assert item.resource_name is None
     assert item.requires_resource_selection is True
-    assert item.account_email == "test@example.com"
     assert item.status == "connected"
 
 
@@ -212,8 +179,7 @@ def test_report_generator_no_none_in_connection_metadata():
     conn = _make_connection(
         provider="meta",
         resource_id=None,
-        resource_name=None,
-    )
+        resource_name=None)
 
     # Simulate the report generator's conn_map logic
     res_id = conn.resource_id
@@ -245,23 +211,16 @@ def test_integration_status_item_has_required_fields():
         resource_id="GTM-123",
         resource_name="Test Container",
         resource_selected=True,
-        requires_resource_selection=True,
-        account_email="test@test.com",
-        account_name="Test User",
-    )
+        requires_resource_selection=True)
 
     # Verify all fields are accessible
     assert item.resource_selected is True
     assert item.requires_resource_selection is True
-    assert item.account_email == "test@test.com"
-    assert item.account_name == "Test User"
 
     # Verify serialization includes the new fields
     data = item.model_dump()
     assert "resource_selected" in data
     assert "requires_resource_selection" in data
-    assert "account_email" in data
-    assert "account_name" in data
 
 
 def test_integration_status_item_defaults():
@@ -270,7 +229,5 @@ def test_integration_status_item_defaults():
 
     assert item.resource_selected is False
     assert item.requires_resource_selection is True
-    assert item.account_email is None
-    assert item.account_name is None
     assert item.resource_id is None
     assert item.resource_name is None

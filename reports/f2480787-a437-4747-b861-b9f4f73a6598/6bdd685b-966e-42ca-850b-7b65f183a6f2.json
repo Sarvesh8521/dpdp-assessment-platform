@@ -1,0 +1,785 @@
+{
+  "assessment_id": "6bdd685b-966e-42ca-850b-7b65f183a6f2",
+  "client_id": "f2480787-a437-4747-b861-b9f4f73a6598",
+  "generated_at": "2026-09-23T11:10:22.791699+00:00",
+  "status": "COMPLETED",
+  "summary": {
+    "total_findings": 3,
+    "override_metrics": {
+      "total_actual_findings": 3,
+      "overridden_count": 0,
+      "override_rate": 0.0,
+      "health_warning": false,
+      "by_obligation": {
+        "OBL-1": {
+          "total": 1,
+          "overridden": 0,
+          "override_rate": 0.0,
+          "health_warning": false
+        },
+        "OBL-2": {
+          "total": 1,
+          "overridden": 0,
+          "override_rate": 0.0,
+          "health_warning": false
+        },
+        "OBL-3": {
+          "total": 1,
+          "overridden": 0,
+          "override_rate": 0.0,
+          "health_warning": false
+        }
+      }
+    },
+    "high_severity": 1,
+    "medium_severity": 1,
+    "low_severity": 1,
+    "requires_human_review": 2,
+    "verdicts": {
+      "observed": 2,
+      "not_observed": 0,
+      "cannot_determine": 1
+    },
+    "reconciliations_count": 1,
+    "reconciliation_contradictions": 1,
+    "integrations_assessed": [
+      "Google Analytics 4",
+      "Google Tag Manager"
+    ],
+    "assessment_outcome": "Issues requiring attention were identified (2 observed). Additionally, evidence was incomplete for 1 obligation(s) that require further investigation."
+  },
+  "selected_integrations": [
+    "ga4",
+    "gtm"
+  ],
+  "combined_report": {
+    "title": "Digital Personal Data Protection (DPDP) - Comprehensive Assessment Report",
+    "assessment_id": "6bdd685b-966e-42ca-850b-7b65f183a6f2",
+    "client_id": "f2480787-a437-4747-b861-b9f4f73a6598",
+    "generated_at": "2026-09-23T11:10:22.791699+00:00",
+    "status": "COMPLETED",
+    "summary": {
+      "total_findings": 3,
+      "override_metrics": {
+        "total_actual_findings": 3,
+        "overridden_count": 0,
+        "override_rate": 0.0,
+        "health_warning": false,
+        "by_obligation": {
+          "OBL-1": {
+            "total": 1,
+            "overridden": 0,
+            "override_rate": 0.0,
+            "health_warning": false
+          },
+          "OBL-2": {
+            "total": 1,
+            "overridden": 0,
+            "override_rate": 0.0,
+            "health_warning": false
+          },
+          "OBL-3": {
+            "total": 1,
+            "overridden": 0,
+            "override_rate": 0.0,
+            "health_warning": false
+          }
+        }
+      },
+      "high_severity": 1,
+      "medium_severity": 1,
+      "low_severity": 1,
+      "requires_human_review": 2,
+      "verdicts": {
+        "observed": 2,
+        "not_observed": 0,
+        "cannot_determine": 1
+      },
+      "reconciliations_count": 1,
+      "reconciliation_contradictions": 1,
+      "integrations_assessed": [
+        "Google Analytics 4",
+        "Google Tag Manager"
+      ],
+      "assessment_outcome": "Issues requiring attention were identified (2 observed). Additionally, evidence was incomplete for 1 obligation(s) that require further investigation."
+    },
+    "selected_integrations": [
+      "ga4",
+      "gtm"
+    ],
+    "individual_reports": {
+      "ga4": {
+        "integration": "ga4",
+        "title": "Google Analytics 4 Assessment Report",
+        "integration_name": "Google Analytics 4",
+        "assessment_id": "6bdd685b-966e-42ca-850b-7b65f183a6f2",
+        "client_id": "f2480787-a437-4747-b861-b9f4f73a6598",
+        "generated_at": "2026-09-23T11:10:22.791699+00:00",
+        "connection_metadata": {
+          "provider": "ga4",
+          "resource_name": null,
+          "connected_at": null
+        },
+        "summary": {
+          "total_findings": 1,
+          "override_metrics": {
+            "total_actual_findings": 1,
+            "overridden_count": 0,
+            "override_rate": 0.0,
+            "health_warning": false
+          },
+          "high_severity": 1,
+          "medium_severity": 0,
+          "low_severity": 0,
+          "verdicts": {
+            "observed": 1,
+            "not_observed": 0,
+            "cannot_determine": 0
+          },
+          "requires_human_review": 0,
+          "assessment_outcome": "Integration not connected; no provider evidence collected."
+        },
+        "findings": [
+          {
+            "finding_id": "165c083b-f459-46d1-8ccb-458c740db467",
+            "obligation_id": "OBL-1",
+            "obligation_uuid": "4dc39ff7-115c-40b5-9929-d729c0ea90ef",
+            "obligation_code": "OBL-1",
+            "obligation_title": "GA4 Rule",
+            "dpdp_section": null,
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": false,
+            "detail": "A real issue in GA4",
+            "reason": null,
+            "compliance_implication": "Pending legal review to determine compliance implications.",
+            "recommended_action": null,
+            "sources": [
+              "ga4:settings"
+            ],
+            "evidence_details": [
+              {
+                "source": "ga4:settings",
+                "detail": "foo"
+              }
+            ]
+          }
+        ],
+        "issues": [
+          {
+            "finding_id": "165c083b-f459-46d1-8ccb-458c740db467",
+            "obligation_id": "OBL-1",
+            "obligation_uuid": "4dc39ff7-115c-40b5-9929-d729c0ea90ef",
+            "obligation_code": "OBL-1",
+            "obligation_title": "GA4 Rule",
+            "dpdp_section": null,
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": false,
+            "detail": "A real issue in GA4",
+            "reason": null,
+            "compliance_implication": "Pending legal review to determine compliance implications.",
+            "recommended_action": null,
+            "sources": [
+              "ga4:settings"
+            ],
+            "evidence_details": [
+              {
+                "source": "ga4:settings",
+                "detail": "foo"
+              }
+            ]
+          }
+        ],
+        "evaluated_obligations": []
+      },
+      "gtm": {
+        "integration": "gtm",
+        "title": "Google Tag Manager Assessment Report",
+        "integration_name": "Google Tag Manager",
+        "assessment_id": "6bdd685b-966e-42ca-850b-7b65f183a6f2",
+        "client_id": "f2480787-a437-4747-b861-b9f4f73a6598",
+        "generated_at": "2026-09-23T11:10:22.791699+00:00",
+        "connection_metadata": {
+          "provider": "gtm",
+          "resource_name": null,
+          "connected_at": null
+        },
+        "summary": {
+          "total_findings": 1,
+          "override_metrics": {
+            "total_actual_findings": 1,
+            "overridden_count": 0,
+            "override_rate": 0.0,
+            "health_warning": false
+          },
+          "high_severity": 0,
+          "medium_severity": 0,
+          "low_severity": 1,
+          "verdicts": {
+            "observed": 0,
+            "not_observed": 0,
+            "cannot_determine": 1
+          },
+          "requires_human_review": 1,
+          "assessment_outcome": "Integration not connected; no provider evidence collected."
+        },
+        "findings": [
+          {
+            "finding_id": "4703fe81-43dd-4325-a628-969824cfe0a2",
+            "obligation_id": "OBL-2",
+            "obligation_uuid": "a667b52f-8bf3-4296-8141-e487e277f4ba",
+            "obligation_code": "OBL-2",
+            "obligation_title": "GTM Rule",
+            "dpdp_section": null,
+            "verdict": "Cannot determine",
+            "confidence": "low",
+            "severity": "low",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": true,
+            "detail": "Missing data in GTM",
+            "reason": null,
+            "compliance_implication": "Pending legal review to determine compliance implications.",
+            "recommended_action": null,
+            "sources": [
+              "gtm:workspaces"
+            ],
+            "evidence_details": [
+              {
+                "source": "gtm:workspaces",
+                "detail": "foo"
+              }
+            ]
+          }
+        ],
+        "issues": [],
+        "evaluated_obligations": [
+          {
+            "finding_id": "4703fe81-43dd-4325-a628-969824cfe0a2",
+            "obligation_id": "OBL-2",
+            "obligation_uuid": "a667b52f-8bf3-4296-8141-e487e277f4ba",
+            "obligation_code": "OBL-2",
+            "obligation_title": "GTM Rule",
+            "dpdp_section": null,
+            "verdict": "Cannot determine",
+            "confidence": "low",
+            "severity": "low",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": true,
+            "detail": "Missing data in GTM",
+            "reason": null,
+            "compliance_implication": "Pending legal review to determine compliance implications.",
+            "recommended_action": null,
+            "sources": [
+              "gtm:workspaces"
+            ],
+            "evidence_details": [
+              {
+                "source": "gtm:workspaces",
+                "detail": "foo"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "integration_reports": [
+      {
+        "integration": "ga4",
+        "title": "Google Analytics 4 Assessment Report",
+        "integration_name": "Google Analytics 4",
+        "assessment_id": "6bdd685b-966e-42ca-850b-7b65f183a6f2",
+        "client_id": "f2480787-a437-4747-b861-b9f4f73a6598",
+        "generated_at": "2026-09-23T11:10:22.791699+00:00",
+        "connection_metadata": {
+          "provider": "ga4",
+          "resource_name": null,
+          "connected_at": null
+        },
+        "summary": {
+          "total_findings": 1,
+          "override_metrics": {
+            "total_actual_findings": 1,
+            "overridden_count": 0,
+            "override_rate": 0.0,
+            "health_warning": false
+          },
+          "high_severity": 1,
+          "medium_severity": 0,
+          "low_severity": 0,
+          "verdicts": {
+            "observed": 1,
+            "not_observed": 0,
+            "cannot_determine": 0
+          },
+          "requires_human_review": 0,
+          "assessment_outcome": "Integration not connected; no provider evidence collected."
+        },
+        "findings": [
+          {
+            "finding_id": "165c083b-f459-46d1-8ccb-458c740db467",
+            "obligation_id": "OBL-1",
+            "obligation_uuid": "4dc39ff7-115c-40b5-9929-d729c0ea90ef",
+            "obligation_code": "OBL-1",
+            "obligation_title": "GA4 Rule",
+            "dpdp_section": null,
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": false,
+            "detail": "A real issue in GA4",
+            "reason": null,
+            "compliance_implication": "Pending legal review to determine compliance implications.",
+            "recommended_action": null,
+            "sources": [
+              "ga4:settings"
+            ],
+            "evidence_details": [
+              {
+                "source": "ga4:settings",
+                "detail": "foo"
+              }
+            ]
+          }
+        ],
+        "issues": [
+          {
+            "finding_id": "165c083b-f459-46d1-8ccb-458c740db467",
+            "obligation_id": "OBL-1",
+            "obligation_uuid": "4dc39ff7-115c-40b5-9929-d729c0ea90ef",
+            "obligation_code": "OBL-1",
+            "obligation_title": "GA4 Rule",
+            "dpdp_section": null,
+            "verdict": "Observed",
+            "confidence": "high",
+            "severity": "high",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": false,
+            "detail": "A real issue in GA4",
+            "reason": null,
+            "compliance_implication": "Pending legal review to determine compliance implications.",
+            "recommended_action": null,
+            "sources": [
+              "ga4:settings"
+            ],
+            "evidence_details": [
+              {
+                "source": "ga4:settings",
+                "detail": "foo"
+              }
+            ]
+          }
+        ],
+        "evaluated_obligations": []
+      },
+      {
+        "integration": "gtm",
+        "title": "Google Tag Manager Assessment Report",
+        "integration_name": "Google Tag Manager",
+        "assessment_id": "6bdd685b-966e-42ca-850b-7b65f183a6f2",
+        "client_id": "f2480787-a437-4747-b861-b9f4f73a6598",
+        "generated_at": "2026-09-23T11:10:22.791699+00:00",
+        "connection_metadata": {
+          "provider": "gtm",
+          "resource_name": null,
+          "connected_at": null
+        },
+        "summary": {
+          "total_findings": 1,
+          "override_metrics": {
+            "total_actual_findings": 1,
+            "overridden_count": 0,
+            "override_rate": 0.0,
+            "health_warning": false
+          },
+          "high_severity": 0,
+          "medium_severity": 0,
+          "low_severity": 1,
+          "verdicts": {
+            "observed": 0,
+            "not_observed": 0,
+            "cannot_determine": 1
+          },
+          "requires_human_review": 1,
+          "assessment_outcome": "Integration not connected; no provider evidence collected."
+        },
+        "findings": [
+          {
+            "finding_id": "4703fe81-43dd-4325-a628-969824cfe0a2",
+            "obligation_id": "OBL-2",
+            "obligation_uuid": "a667b52f-8bf3-4296-8141-e487e277f4ba",
+            "obligation_code": "OBL-2",
+            "obligation_title": "GTM Rule",
+            "dpdp_section": null,
+            "verdict": "Cannot determine",
+            "confidence": "low",
+            "severity": "low",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": true,
+            "detail": "Missing data in GTM",
+            "reason": null,
+            "compliance_implication": "Pending legal review to determine compliance implications.",
+            "recommended_action": null,
+            "sources": [
+              "gtm:workspaces"
+            ],
+            "evidence_details": [
+              {
+                "source": "gtm:workspaces",
+                "detail": "foo"
+              }
+            ]
+          }
+        ],
+        "issues": [],
+        "evaluated_obligations": [
+          {
+            "finding_id": "4703fe81-43dd-4325-a628-969824cfe0a2",
+            "obligation_id": "OBL-2",
+            "obligation_uuid": "a667b52f-8bf3-4296-8141-e487e277f4ba",
+            "obligation_code": "OBL-2",
+            "obligation_title": "GTM Rule",
+            "dpdp_section": null,
+            "verdict": "Cannot determine",
+            "confidence": "low",
+            "severity": "low",
+            "status": "open",
+            "is_overridden": false,
+            "human_review_required": true,
+            "detail": "Missing data in GTM",
+            "reason": null,
+            "compliance_implication": "Pending legal review to determine compliance implications.",
+            "recommended_action": null,
+            "sources": [
+              "gtm:workspaces"
+            ],
+            "evidence_details": [
+              {
+                "source": "gtm:workspaces",
+                "detail": "foo"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "cross_source_reconciliation": [
+      {
+        "rule_id": "test_rule",
+        "source_a": "scope_sheet",
+        "source_b": "phase1_scanner",
+        "result": "contradiction",
+        "outcome": "contradiction",
+        "confidence": "high",
+        "human_review_required": true,
+        "detail": "Phase 1 disagrees with scope sheet",
+        "obligation_code": "OBL-3",
+        "evidence_a_detail": "Declared",
+        "evidence_b_detail": "Phase 1",
+        "evidence_a_id": null,
+        "evidence_b_id": null
+      }
+    ]
+  },
+  "individual_reports": {
+    "ga4": {
+      "integration": "ga4",
+      "title": "Google Analytics 4 Assessment Report",
+      "integration_name": "Google Analytics 4",
+      "assessment_id": "6bdd685b-966e-42ca-850b-7b65f183a6f2",
+      "client_id": "f2480787-a437-4747-b861-b9f4f73a6598",
+      "generated_at": "2026-09-23T11:10:22.791699+00:00",
+      "connection_metadata": {
+        "provider": "ga4",
+        "resource_name": null,
+        "connected_at": null
+      },
+      "summary": {
+        "total_findings": 1,
+        "override_metrics": {
+          "total_actual_findings": 1,
+          "overridden_count": 0,
+          "override_rate": 0.0,
+          "health_warning": false
+        },
+        "high_severity": 1,
+        "medium_severity": 0,
+        "low_severity": 0,
+        "verdicts": {
+          "observed": 1,
+          "not_observed": 0,
+          "cannot_determine": 0
+        },
+        "requires_human_review": 0,
+        "assessment_outcome": "Integration not connected; no provider evidence collected."
+      },
+      "findings": [
+        {
+          "finding_id": "165c083b-f459-46d1-8ccb-458c740db467",
+          "obligation_id": "OBL-1",
+          "obligation_uuid": "4dc39ff7-115c-40b5-9929-d729c0ea90ef",
+          "obligation_code": "OBL-1",
+          "obligation_title": "GA4 Rule",
+          "dpdp_section": null,
+          "verdict": "Observed",
+          "confidence": "high",
+          "severity": "high",
+          "status": "open",
+          "is_overridden": false,
+          "human_review_required": false,
+          "detail": "A real issue in GA4",
+          "reason": null,
+          "compliance_implication": "Pending legal review to determine compliance implications.",
+          "recommended_action": null,
+          "sources": [
+            "ga4:settings"
+          ],
+          "evidence_details": [
+            {
+              "source": "ga4:settings",
+              "detail": "foo"
+            }
+          ]
+        }
+      ],
+      "issues": [
+        {
+          "finding_id": "165c083b-f459-46d1-8ccb-458c740db467",
+          "obligation_id": "OBL-1",
+          "obligation_uuid": "4dc39ff7-115c-40b5-9929-d729c0ea90ef",
+          "obligation_code": "OBL-1",
+          "obligation_title": "GA4 Rule",
+          "dpdp_section": null,
+          "verdict": "Observed",
+          "confidence": "high",
+          "severity": "high",
+          "status": "open",
+          "is_overridden": false,
+          "human_review_required": false,
+          "detail": "A real issue in GA4",
+          "reason": null,
+          "compliance_implication": "Pending legal review to determine compliance implications.",
+          "recommended_action": null,
+          "sources": [
+            "ga4:settings"
+          ],
+          "evidence_details": [
+            {
+              "source": "ga4:settings",
+              "detail": "foo"
+            }
+          ]
+        }
+      ],
+      "evaluated_obligations": []
+    },
+    "gtm": {
+      "integration": "gtm",
+      "title": "Google Tag Manager Assessment Report",
+      "integration_name": "Google Tag Manager",
+      "assessment_id": "6bdd685b-966e-42ca-850b-7b65f183a6f2",
+      "client_id": "f2480787-a437-4747-b861-b9f4f73a6598",
+      "generated_at": "2026-09-23T11:10:22.791699+00:00",
+      "connection_metadata": {
+        "provider": "gtm",
+        "resource_name": null,
+        "connected_at": null
+      },
+      "summary": {
+        "total_findings": 1,
+        "override_metrics": {
+          "total_actual_findings": 1,
+          "overridden_count": 0,
+          "override_rate": 0.0,
+          "health_warning": false
+        },
+        "high_severity": 0,
+        "medium_severity": 0,
+        "low_severity": 1,
+        "verdicts": {
+          "observed": 0,
+          "not_observed": 0,
+          "cannot_determine": 1
+        },
+        "requires_human_review": 1,
+        "assessment_outcome": "Integration not connected; no provider evidence collected."
+      },
+      "findings": [
+        {
+          "finding_id": "4703fe81-43dd-4325-a628-969824cfe0a2",
+          "obligation_id": "OBL-2",
+          "obligation_uuid": "a667b52f-8bf3-4296-8141-e487e277f4ba",
+          "obligation_code": "OBL-2",
+          "obligation_title": "GTM Rule",
+          "dpdp_section": null,
+          "verdict": "Cannot determine",
+          "confidence": "low",
+          "severity": "low",
+          "status": "open",
+          "is_overridden": false,
+          "human_review_required": true,
+          "detail": "Missing data in GTM",
+          "reason": null,
+          "compliance_implication": "Pending legal review to determine compliance implications.",
+          "recommended_action": null,
+          "sources": [
+            "gtm:workspaces"
+          ],
+          "evidence_details": [
+            {
+              "source": "gtm:workspaces",
+              "detail": "foo"
+            }
+          ]
+        }
+      ],
+      "issues": [],
+      "evaluated_obligations": [
+        {
+          "finding_id": "4703fe81-43dd-4325-a628-969824cfe0a2",
+          "obligation_id": "OBL-2",
+          "obligation_uuid": "a667b52f-8bf3-4296-8141-e487e277f4ba",
+          "obligation_code": "OBL-2",
+          "obligation_title": "GTM Rule",
+          "dpdp_section": null,
+          "verdict": "Cannot determine",
+          "confidence": "low",
+          "severity": "low",
+          "status": "open",
+          "is_overridden": false,
+          "human_review_required": true,
+          "detail": "Missing data in GTM",
+          "reason": null,
+          "compliance_implication": "Pending legal review to determine compliance implications.",
+          "recommended_action": null,
+          "sources": [
+            "gtm:workspaces"
+          ],
+          "evidence_details": [
+            {
+              "source": "gtm:workspaces",
+              "detail": "foo"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "findings": [
+    {
+      "finding_id": "165c083b-f459-46d1-8ccb-458c740db467",
+      "obligation_id": "OBL-1",
+      "obligation_uuid": "4dc39ff7-115c-40b5-9929-d729c0ea90ef",
+      "obligation_code": "OBL-1",
+      "obligation_title": "GA4 Rule",
+      "dpdp_section": null,
+      "verdict": "Observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "open",
+      "is_overridden": false,
+      "human_review_required": false,
+      "detail": "A real issue in GA4",
+      "reason": null,
+      "compliance_implication": "Pending legal review to determine compliance implications.",
+      "recommended_action": null,
+      "sources": [
+        "ga4:settings"
+      ],
+      "evidence_details": [
+        {
+          "source": "ga4:settings",
+          "detail": "foo"
+        }
+      ]
+    },
+    {
+      "finding_id": "4703fe81-43dd-4325-a628-969824cfe0a2",
+      "obligation_id": "OBL-2",
+      "obligation_uuid": "a667b52f-8bf3-4296-8141-e487e277f4ba",
+      "obligation_code": "OBL-2",
+      "obligation_title": "GTM Rule",
+      "dpdp_section": null,
+      "verdict": "Cannot determine",
+      "confidence": "low",
+      "severity": "low",
+      "status": "open",
+      "is_overridden": false,
+      "human_review_required": true,
+      "detail": "Missing data in GTM",
+      "reason": null,
+      "compliance_implication": "Pending legal review to determine compliance implications.",
+      "recommended_action": null,
+      "sources": [
+        "gtm:workspaces"
+      ],
+      "evidence_details": [
+        {
+          "source": "gtm:workspaces",
+          "detail": "foo"
+        }
+      ]
+    },
+    {
+      "finding_id": "2560cd33-f480-4601-8bd0-c9052519c946",
+      "obligation_id": "OBL-3",
+      "obligation_uuid": "175ee7cb-4660-4733-8db5-6bac2685999d",
+      "obligation_code": "OBL-3",
+      "obligation_title": "Cross Rule",
+      "dpdp_section": null,
+      "verdict": "Observed",
+      "confidence": "high",
+      "severity": "medium",
+      "status": "open",
+      "is_overridden": false,
+      "human_review_required": true,
+      "detail": "Contradiction finding",
+      "reason": null,
+      "compliance_implication": "Pending legal review to determine compliance implications.",
+      "recommended_action": null,
+      "sources": [
+        "phase1_scanner:cookies",
+        "scope_sheet:marketing_platforms"
+      ],
+      "evidence_details": [
+        {
+          "source": "phase1_scanner:cookies",
+          "detail": "Phase 1"
+        },
+        {
+          "source": "scope_sheet:marketing_platforms",
+          "detail": "Declared"
+        }
+      ]
+    }
+  ],
+  "reconciliations": [
+    {
+      "rule_id": "test_rule",
+      "source_a": "scope_sheet",
+      "source_b": "phase1_scanner",
+      "result": "contradiction",
+      "outcome": "contradiction",
+      "confidence": "high",
+      "human_review_required": true,
+      "detail": "Phase 1 disagrees with scope sheet",
+      "obligation_code": "OBL-3",
+      "evidence_a_detail": "Declared",
+      "evidence_b_detail": "Phase 1",
+      "evidence_a_id": null,
+      "evidence_b_id": null
+    }
+  ]
+}

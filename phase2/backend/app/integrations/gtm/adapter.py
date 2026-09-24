@@ -74,7 +74,10 @@ GTM_FORBIDDEN_FIELDS = frozenset({
 })
 
 # Endpoints that must NEVER be called
-GTM_FORBIDDEN_ENDPOINTS: list[str] = []  # GTM API has no PII endpoints, but we list for completeness
+GTM_FORBIDDEN_ENDPOINTS: list[str] = [
+    "/users",
+    "/permissions"
+]  # GTM API has no PII endpoints, but we list for completeness
 
 
 class GTMAdapter(IntegrationAdapter):
@@ -129,15 +132,14 @@ class GTMAdapter(IntegrationAdapter):
             forbidden_fields=GTM_FORBIDDEN_FIELDS,
         )
 
-    async def connect(self, credentials: dict[str, Any]) -> ConnectionInfo:
+    async def connect(self, credentials: dict[str, Any], audit_callback: Any) -> ConnectionInfo:
         """Connect to GTM using OAuth credentials."""
         access_token = credentials.get("access_token", "")
         if not access_token:
             raise ExternalAPIError("Missing access token", provider=self.provider)
 
         client = AuditedHTTPClient(
-            provider=self.provider,
-            base_url=GTM_BASE_URL,
+            provider=self.provider, audit_callback=audit_callback, base_url=GTM_BASE_URL,
             access_token=access_token,
         )
 
@@ -159,7 +161,14 @@ class GTMAdapter(IntegrationAdapter):
         finally:
             await client.close()
 
-    async def health_check(self, connection: ConnectionInfo) -> HealthStatus:
+    async def health_check(
+        self,
+        connection: ConnectionInfo,
+        audit_callback: Any,
+        *,
+        client_id: str | None = None,
+        assessment_id: str | None = None,
+    ) -> HealthStatus:
         """Check GTM connection health."""
         return HealthStatus(
             healthy=True,
@@ -169,13 +178,11 @@ class GTMAdapter(IntegrationAdapter):
         )
 
     async def collect(
-        self,
-        connection: ConnectionInfo,
-        *,
+        self, connection: ConnectionInfo, audit_callback: Any, *,
         assessment_id: str | None = None,
         client_id: str | None = None,
         access_token: str = "",
-        audit_callback: Any = None,
+        
     ) -> AdapterResult:
         """Collect GTM evidence — containers, tags, consent settings.
 
@@ -192,15 +199,13 @@ class GTMAdapter(IntegrationAdapter):
         now = datetime.now(timezone.utc)
 
         client = AuditedHTTPClient(
-            provider=self.provider,
-            base_url=GTM_BASE_URL,
+            provider=self.provider, audit_callback=audit_callback, base_url=GTM_BASE_URL,
             access_token=access_token,
             forbidden_endpoints=self.forbidden_endpoints,
             obligations_served=self.obligations_answered,
             client_id=client_id,
             assessment_id=assessment_id,
-            audit_callback=audit_callback,
-        )
+            )
 
         try:
             # Step 1: List all accounts and containers
@@ -295,7 +300,7 @@ class GTMAdapter(IntegrationAdapter):
                                     
                                     evidence.append(EvidenceItem(
                                         obligation_id="S12.governance.tagInventory",
-                                        verdict=Verdict.OBSERVED,
+                                        verdict=Verdict.NOT_OBSERVED,
                                         confidence=Confidence.HIGH,
                                         source=f"gtm:version:{v_id}",
                                         observed_at=now,
@@ -370,7 +375,7 @@ class GTMAdapter(IntegrationAdapter):
 
                 evidence.append(EvidenceItem(
                     obligation_id="S6.consentGating",
-                    verdict=Verdict.OBSERVED if t["has_consent_settings"] else Verdict.NOT_OBSERVED,
+                    verdict=Verdict.NOT_OBSERVED if t["has_consent_settings"] else Verdict.OBSERVED,
                     confidence=Confidence.HIGH,
                     source=f"gtm:tag:{t['id']}",
                     observed_at=now,
@@ -434,8 +439,8 @@ class GTMAdapter(IntegrationAdapter):
             # ── S12.governance.tagInventory evidence ──
             evidence.append(EvidenceItem(
                 obligation_id="S12.governance.tagInventory",
-                verdict=Verdict.OBSERVED if total_tags > 0 else Verdict.CANNOT_DETERMINE,
-                confidence=Confidence.HIGH if total_tags > 0 else Confidence.LOW,
+                verdict=Verdict.NOT_OBSERVED,
+                confidence=Confidence.HIGH,
                 source="gtm:tag_inventory",
                 observed_at=now,
                 detail=f"GTM contains {total_tags} tags across all containers.",

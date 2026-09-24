@@ -89,6 +89,8 @@ SAFE_FIELD_PATTERNS = frozenset({
     "hash", "fingerprint", "checksum",
     "account_id", "container_id", "property_id",
     "workspace_id", "tag_id", "trigger_id",
+    "resource_name", "container_name", "account_name", "property_name", 
+    "workspace_name", "client_name", "display_name", "name",
 })
 
 
@@ -113,7 +115,29 @@ def sanitize_value(value: Any, field_name: str = "") -> Any:
         return sanitize_dict(value)
     if isinstance(value, list):
         return [sanitize_value(item, field_name) for item in value]
+    if isinstance(value, str):
+        return sanitize_string(value)
     return value
+
+def sanitize_string(text: str | None) -> str | None:
+    """Redact emails and phone numbers from a string."""
+    if not text:
+        return text
+    
+    # Redact Emails
+    email_pattern = re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+')
+    text = email_pattern.sub('[REDACTED_EMAIL]', text)
+    
+    # Redact common phone patterns (basic heuristic)
+    # Matches +1-234-567-8900, (123) 456-7890, 123-456-7890
+    phone_pattern = re.compile(r'(?:(?:\+?1\s*(?:[.-]\s*)?)?(?:\(\s*([2-9]1[02-9]|[2-9][02-8]1|[2-9][02-8][02-9])\s*\)|([2-9]1[02-9]|[2-9][02-8]1|[2-9][02-8][02-9]))\s*(?:[.-]\s*)?)?([2-9]1[02-9]|[2-9][02-9]1|[2-9][02-9]{2})\s*(?:[.-]\s*)?([0-9]{4})(?:\s*(?:#|x\.?|ext\.?|extension)\s*(\d+))?')
+    
+    # Simpler phone pattern to avoid catastrophic backtracking and match common ones
+    # (Matches 10+ digits with optional separators)
+    simple_phone_pattern = re.compile(r'\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b')
+    text = simple_phone_pattern.sub('[REDACTED_PHONE]', text)
+    
+    return text
 
 
 def sanitize_dict(

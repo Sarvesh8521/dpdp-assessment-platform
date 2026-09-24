@@ -146,28 +146,35 @@ def apply_confidence_rules(
     if not relevant:
         return Verdict.CANNOT_DETERMINE, Confidence.LOW, False
 
-    # Single source
-    if len(relevant) == 1:
-        item = relevant[0]
+    # Filter out CANNOT_DETERMINE if there are definitive verdicts
+    definitive_relevant = [e for e in relevant if e.verdict != Verdict.CANNOT_DETERMINE]
+    
+    if not definitive_relevant:
+        # All sources are CANNOT_DETERMINE
+        return Verdict.CANNOT_DETERMINE, Confidence.LOW, False
+
+    # Single definitive source
+    if len(definitive_relevant) == 1:
+        item = definitive_relevant[0]
         return item.verdict, item.confidence, False
 
-    # Multiple sources — check for agreement vs contradiction
-    verdicts = {e.verdict for e in relevant}
-    unique_sources = {e.source.split(":")[0] for e in relevant}
+    # Multiple definitive sources — check for agreement vs contradiction
+    verdicts = {e.verdict for e in definitive_relevant}
+    unique_sources = {e.source.split(":")[0] for e in definitive_relevant}
 
     if len(verdicts) == 1:
-        # All sources agree
-        agreed_verdict = relevant[0].verdict
+        # All definitive sources agree
+        agreed_verdict = definitive_relevant[0].verdict
 
         if len(unique_sources) >= 2:
             # Two independent agreeing sources → HIGH confidence
             return agreed_verdict, Confidence.HIGH, False
         else:
             # Same source, multiple evidence — use highest confidence
-            best_confidence = _highest_confidence(relevant)
+            best_confidence = _highest_confidence(definitive_relevant)
             return agreed_verdict, best_confidence, False
 
-    # Sources disagree — flag for human review, NEVER auto-resolve
+    # Definitive sources disagree (e.g., OBSERVED vs NOT_OBSERVED) — flag for human review
     return Verdict.CANNOT_DETERMINE, Confidence.LOW, True
 
 

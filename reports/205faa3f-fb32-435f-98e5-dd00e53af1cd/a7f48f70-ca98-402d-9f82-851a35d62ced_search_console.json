@@ -1,0 +1,35 @@
+{
+  "integration": "search_console",
+  "title": "Google Search Console Assessment Report",
+  "integration_name": "Google Search Console",
+  "assessment_id": "a7f48f70-ca98-402d-9f82-851a35d62ced",
+  "client_id": "205faa3f-fb32-435f-98e5-dd00e53af1cd",
+  "generated_at": "2026-09-23T11:16:28.958734+00:00",
+  "connection_metadata": {
+    "provider": "search_console",
+    "resource_name": null,
+    "connected_at": null
+  },
+  "summary": {
+    "total_findings": 0,
+    "override_metrics": {
+      "total_actual_findings": 0,
+      "overridden_count": 0,
+      "override_rate": 0.0,
+      "health_warning": false
+    },
+    "high_severity": 0,
+    "medium_severity": 0,
+    "low_severity": 0,
+    "verdicts": {
+      "observed": 0,
+      "not_observed": 0,
+      "cannot_determine": 0
+    },
+    "requires_human_review": 0,
+    "assessment_outcome": "Integration not connected; no provider evidence collected."
+  },
+  "findings": [],
+  "issues": [],
+  "evaluated_obligations": []
+}

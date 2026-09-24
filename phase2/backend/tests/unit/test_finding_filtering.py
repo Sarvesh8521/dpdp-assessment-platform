@@ -31,6 +31,9 @@ class MockFinding:
         self.human_review_required = human_review_required
         self.sources = sources
         self.evidence_details = []
+        from app.db.models.finding import FindingStatus
+        self.status = FindingStatus.OPEN
+        self.overrides = []
         self.reason = "Mock reason"
 
 
@@ -144,9 +147,12 @@ async def test_finding_filtering_by_source():
         gtm_finding_ids = [f["finding_id"] for f in gtm_report.get("findings", [])]
         assert str(finding_gtm.id) in gtm_finding_ids
         
-        # 4. Multi-source findings should NOT appear in individual reports
-        assert str(finding_multi.id) not in gtm_finding_ids
-        assert str(finding_multi.id) not in [f["finding_id"] for f in ind_reports.get("ga4", {}).get("findings", [])]
+        # 4. Multi-source findings SHOULD appear in their respective individual reports
+        assert str(finding_multi.id) in gtm_finding_ids
+        
+        ga4_report = ind_reports.get("ga4", {})
+        ga4_finding_ids = [f["finding_id"] for f in ga4_report.get("findings", [])]
+        assert str(finding_multi.id) in ga4_finding_ids
         
         # But all findings MUST be in the combined report findings array
         all_finding_ids = [f["finding_id"] for f in report_json.get("findings", [])]

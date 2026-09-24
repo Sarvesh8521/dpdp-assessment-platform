@@ -161,3 +161,23 @@ def run_assessment_integration(self, client_id: str, assessment_id: str, run_id:
     except Exception as exc:
         logger.exception("Task failed")
         self.retry(exc=exc, countdown=60)
+
+async def _run_daily_retention_purge_async() -> dict[str, int]:
+    """Async wrapper for the daily retention purge."""
+    from app.services.retention_service import RetentionService
+    async with async_session_factory() as session:
+        service = RetentionService(session)
+        stats = await service.apply_retention_policy()
+        return stats
+
+@celery_app.task(name="run_daily_retention_purge")
+def run_daily_retention_purge() -> dict[str, int]:
+    """Execute the daily retention purge."""
+    logger.info("Starting daily retention purge")
+    try:
+        stats = asyncio.run(_run_daily_retention_purge_async())
+        logger.info(f"Completed daily retention purge. Stats: {stats}")
+        return stats
+    except Exception:
+        logger.exception("Daily retention purge failed")
+        raise

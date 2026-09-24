@@ -68,8 +68,7 @@ def mock_obligation():
         id=uuid.uuid4(),
         code="OBL_1",
         title="Test Obligation",
-        severity=ObligationSeverity.HIGH,
-    )
+        severity=ObligationSeverity.HIGH)
 
 
 @pytest.mark.asyncio

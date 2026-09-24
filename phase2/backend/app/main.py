@@ -12,7 +12,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import assessments, auth, auth_google, clients, integrations, audit_logs, findings
+from app.api.v1 import assessments, auth, auth_google, clients, integrations, audit_logs, findings, system
 from app.core.config import get_settings
 from app.core.logging import setup_logging, get_logger
 
@@ -54,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(clients.router, prefix="/api/v1")
     app.include_router(integrations.router, prefix="/api/v1")
     app.include_router(audit_logs.router, prefix="/api/v1")
+    app.include_router(system.router, prefix="/api/v1")
 
     @app.get("/health")
     async def health_check() -> dict[str, str]:

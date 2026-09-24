@@ -16,9 +16,10 @@ from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSON, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.security.pii_sanitizer import sanitize_dict, sanitize_string
 
 
 class Verdict(str, enum.Enum):
@@ -80,6 +81,14 @@ class Evidence(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Relationships
     assessment = relationship("Assessment", back_populates="evidence_items")
+
+    @validates("detail", "reason")
+    def sanitize_strings(self, key, value):
+        return sanitize_string(value) if value else value
+
+    @validates("sanitized_metadata", "structured_detail")
+    def sanitize_dicts(self, key, value):
+        return sanitize_dict(value) if value else value
 
     __table_args__ = (
         # HARD RULE: LOW confidence can NEVER result in "Not observed"

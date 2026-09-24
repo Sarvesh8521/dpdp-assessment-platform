@@ -11,7 +11,14 @@ def test_github_sdks_vs_declared_agreement():
             verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
             source="github:static_analysis", observed_at=datetime.now(timezone.utc),
             detail="Found SDKs.",
-            raw_metadata={"sdks": [{"sdk": "Firebase"}, {"sdk": "AppsFlyer"}]}
+            raw_metadata={"sdk": "Firebase"}
+        ),
+        EvidenceItem(
+            obligation_id="S10.scope.sdks",
+            verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
+            source="github:static_analysis", observed_at=datetime.now(timezone.utc),
+            detail="Found SDKs.",
+            raw_metadata={"sdk": "AppsFlyer"}
         )
     ]
     evidence_b = [
@@ -38,7 +45,14 @@ def test_github_sdks_vs_declared_contradiction():
             verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
             source="github:static_analysis", observed_at=datetime.now(timezone.utc),
             detail="Found SDKs.",
-            raw_metadata={"sdks": [{"sdk": "CleverTap"}, {"sdk": "AppsFlyer"}]}
+            raw_metadata={"sdk": "CleverTap"}
+        ),
+        EvidenceItem(
+            obligation_id="S10.scope.sdks",
+            verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
+            source="github:static_analysis", observed_at=datetime.now(timezone.utc),
+            detail="Found SDKs.",
+            raw_metadata={"sdk": "AppsFlyer"}
         )
     ]
     evidence_b = [
@@ -66,7 +80,7 @@ def test_github_sdks_vs_declared_no_declared_platforms():
             verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
             source="github:static_analysis", observed_at=datetime.now(timezone.utc),
             detail="Found SDKs.",
-            raw_metadata={"sdks": [{"sdk": "Branch"}]}
+            raw_metadata={"sdk": "Branch"}
         )
     ]
     evidence_b = [] # No scope sheet data
@@ -75,3 +89,20 @@ def test_github_sdks_vs_declared_no_declared_platforms():
     assert len(findings) == 1
     assert findings[0].outcome == "insufficient_data"
     assert "Branch" in findings[0].detail
+
+def test_github_sdks_vs_declared_missing_github():
+    rule = GitHubSDKsVsDeclared()
+    evidence_a = [] # No github data
+    evidence_b = [
+        EvidenceItem(
+            obligation_id="S10.scope.platforms",
+            verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
+            source="scope_sheet:marketing_platforms", observed_at=datetime.now(timezone.utc),
+            detail="Declared platforms.",
+            raw_metadata={"marketing_platforms": ["AppsFlyer"]}
+        )
+    ]
+
+    findings = rule.reconcile(evidence_a, evidence_b)
+    assert len(findings) == 1
+    assert findings[0].outcome == "insufficient_data"

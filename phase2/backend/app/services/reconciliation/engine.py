@@ -68,6 +68,8 @@ class ReconciliationFinding:
         human_review_required: bool = False,
         evidence_a_detail: str = "",
         evidence_b_detail: str = "",
+        evidence_a_ids: list[str] | None = None,
+        evidence_b_ids: list[str] | None = None,
     ) -> None:
         self.rule_id = rule_id
         self.obligation_id = obligation_id
@@ -79,6 +81,8 @@ class ReconciliationFinding:
         self.human_review_required = human_review_required
         self.evidence_a_detail = evidence_a_detail
         self.evidence_b_detail = evidence_b_detail
+        self.evidence_a_ids = evidence_a_ids or []
+        self.evidence_b_ids = evidence_b_ids or []
 
 
 # ── Rule 1: GTM tags vs Phase 1 observed tags ──
@@ -106,9 +110,34 @@ class GTMvsPhase1Tags(ReconciliationRule):
         return ["S6.consentGating", "S12.governance.tagInventory"]
 
     def reconcile(self, evidence_a: list[EvidenceItem], evidence_b: list[EvidenceItem]) -> list[ReconciliationFinding]:
-        if not evidence_b:
-            return []
         findings: list[ReconciliationFinding] = []
+        a_ids = [e.source for e in evidence_a]
+        b_ids = [e.source for e in evidence_b]
+
+        if not evidence_a:
+            return [ReconciliationFinding(
+                rule_id=self.id, obligation_id="S6.consentGating",
+                source_a="gtm", source_b="phase1_scanner",
+                outcome="insufficient_data", confidence=Confidence.LOW,
+                detail="Scanner observed tags, but GTM integration is not connected to verify tag inventory.",
+                human_review_required=False,
+                evidence_a_detail="GTM evidence missing.",
+                evidence_b_detail="Scanner evidence provided.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
+            )]
+
+        if not evidence_b:
+            return [ReconciliationFinding(
+                rule_id=self.id, obligation_id="S6.consentGating",
+                source_a="gtm", source_b="phase1_scanner",
+                outcome="insufficient_data", confidence=Confidence.LOW,
+                detail="GTM is connected, but Phase 1 scanner evidence is missing.",
+                human_review_required=False,
+                evidence_a_detail="GTM evidence provided.",
+                evidence_b_detail="Scanner evidence missing.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
+            )]
+
         # Compare tag inventories from GTM vs scanner
         gtm_tags = set()
         scanner_tags = set()
@@ -133,6 +162,8 @@ class GTMvsPhase1Tags(ReconciliationRule):
                 confidence=Confidence.HIGH,
                 detail=f"Tags observed by scanner but NOT in GTM: {', '.join(scanner_only)}. These are likely hardcoded outside the tag manager.",
                 human_review_required=True,
+                evidence_a_ids=a_ids,
+                evidence_b_ids=b_ids,
             ))
         elif gtm_tags and scanner_tags:
             findings.append(ReconciliationFinding(
@@ -142,6 +173,8 @@ class GTMvsPhase1Tags(ReconciliationRule):
                 outcome="agreement",
                 confidence=Confidence.HIGH,
                 detail="GTM tag inventory matches scanner observations.",
+                evidence_a_ids=a_ids,
+                evidence_b_ids=b_ids,
             ))
 
         return findings
@@ -170,9 +203,33 @@ class GTMConsentVsObserved(ReconciliationRule):
         return ["S6.consentMode", "S6.consentPropagation"]
 
     def reconcile(self, evidence_a: list[EvidenceItem], evidence_b: list[EvidenceItem]) -> list[ReconciliationFinding]:
-        if not evidence_b:
-            return []
         findings: list[ReconciliationFinding] = []
+        a_ids = [e.source for e in evidence_a]
+        b_ids = [e.source for e in evidence_b]
+
+        if not evidence_a:
+            return [ReconciliationFinding(
+                rule_id=self.id, obligation_id="S6.consentMode",
+                source_a="gtm", source_b="phase1_scanner",
+                outcome="insufficient_data", confidence=Confidence.LOW,
+                detail="Scanner observed consent signals, but GTM integration is not connected to verify consent settings.",
+                human_review_required=False,
+                evidence_a_detail="GTM evidence missing.",
+                evidence_b_detail="Scanner evidence provided.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
+            )]
+
+        if not evidence_b:
+            return [ReconciliationFinding(
+                rule_id=self.id, obligation_id="S6.consentMode",
+                source_a="gtm", source_b="phase1_scanner",
+                outcome="insufficient_data", confidence=Confidence.LOW,
+                detail="GTM is connected, but Phase 1 scanner consent evidence is missing.",
+                human_review_required=False,
+                evidence_a_detail="GTM evidence provided.",
+                evidence_b_detail="Scanner evidence missing.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
+            )]
         # Compare configured consent settings with observed behavior
         gtm_consent_configured = any(
             e.verdict == Verdict.OBSERVED and "consent" in e.obligation_id.lower()
@@ -190,6 +247,7 @@ class GTMConsentVsObserved(ReconciliationRule):
                 outcome="contradiction", confidence=Confidence.HIGH,
                 detail="GTM has consent settings configured but scanner did not observe consent signals. Configured but not working.",
                 human_review_required=True,
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             ))
         elif not gtm_consent_configured and scanner_consent_observed:
             findings.append(ReconciliationFinding(
@@ -198,6 +256,7 @@ class GTMConsentVsObserved(ReconciliationRule):
                 outcome="contradiction", confidence=Confidence.MEDIUM,
                 detail="Scanner observed consent signals but GTM has no consent settings configured. Working but not configured in GTM.",
                 human_review_required=True,
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             ))
         elif gtm_consent_configured and scanner_consent_observed:
             findings.append(ReconciliationFinding(
@@ -205,6 +264,7 @@ class GTMConsentVsObserved(ReconciliationRule):
                 source_a="gtm", source_b="phase1_scanner",
                 outcome="agreement", confidence=Confidence.HIGH,
                 detail="GTM consent configuration matches scanner observations.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             ))
 
         return findings
@@ -234,6 +294,8 @@ class GA4LinkedVsDeclared(ReconciliationRule):
 
     def reconcile(self, evidence_a: list[EvidenceItem], evidence_b: list[EvidenceItem]) -> list[ReconciliationFinding]:
         findings: list[ReconciliationFinding] = []
+        a_ids = [e.source for e in evidence_a]
+        b_ids = [e.source for e in evidence_b]
         
         if not evidence_a:
             return [ReconciliationFinding(
@@ -241,9 +303,10 @@ class GA4LinkedVsDeclared(ReconciliationRule):
                 source_a="ga4", source_b="scope_sheet",
                 outcome="insufficient_data", confidence=Confidence.LOW,
                 detail="Scope sheet declares platforms, but GA4 integration is not connected to verify linked services.",
-                human_review_required=True,
+                human_review_required=False,
                 evidence_a_detail="GA4 evidence missing.",
-                evidence_b_detail="Scope sheet platforms provided."
+                evidence_b_detail="Scope sheet platforms provided.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             )]
         
         # 1. Gather all GA4 linked services
@@ -276,9 +339,10 @@ class GA4LinkedVsDeclared(ReconciliationRule):
                     outcome="insufficient_data",
                     confidence=Confidence.LOW,
                     detail=f"GA4 linked service '{link_type}' found, but no scope sheet data provided to verify.",
-                    human_review_required=True,
+                    human_review_required=False,
                     evidence_a_detail=e.detail,
                     evidence_b_detail="No declared platforms provided in scope sheet",
+                    evidence_a_ids=a_ids, evidence_b_ids=b_ids,
                 ))
             return findings
 
@@ -301,6 +365,7 @@ class GA4LinkedVsDeclared(ReconciliationRule):
                     human_review_required=False,
                     evidence_a_detail=e.detail,
                     evidence_b_detail=f"Declared platforms in scope sheet include: {', '.join(declared_platforms)}",
+                    evidence_a_ids=a_ids, evidence_b_ids=b_ids,
                 ))
             else:
                 findings.append(ReconciliationFinding(
@@ -312,6 +377,7 @@ class GA4LinkedVsDeclared(ReconciliationRule):
                     human_review_required=True,
                     evidence_a_detail=e.detail,
                     evidence_b_detail=f"Declared platforms in scope sheet include: {', '.join(declared_platforms)}",
+                    evidence_a_ids=a_ids, evidence_b_ids=b_ids,
                 ))
 
         return findings
@@ -340,15 +406,18 @@ class AdsMatchVsConsent(ReconciliationRule):
         return ["S9.sharing.audienceUpload"]
 
     def reconcile(self, evidence_a: list[EvidenceItem], evidence_b: list[EvidenceItem]) -> list[ReconciliationFinding]:
+        a_ids = [e.source for e in evidence_a]
+        b_ids = [e.source for e in evidence_b]
         if not evidence_a:
             return [ReconciliationFinding(
                 rule_id=self.id, obligation_id="S9.sharing.audienceUpload",
                 source_a="google_ads", source_b="cmp",
                 outcome="insufficient_data", confidence=Confidence.LOW,
                 detail="CMP integration is connected, but Google Ads integration is not connected to verify Customer Match lists.",
-                human_review_required=True,
+                human_review_required=False,
                 evidence_a_detail="Google Ads evidence missing.",
-                evidence_b_detail="CMP evidence provided."
+                evidence_b_detail="CMP evidence provided.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             )]
             
         # 1. Identify if Customer Match is present
@@ -386,9 +455,10 @@ class AdsMatchVsConsent(ReconciliationRule):
                 source_a="google_ads", source_b="cmp",
                 outcome="insufficient_data", confidence=Confidence.LOW,
                 detail="Customer Match lists exist, but no CMP purpose evidence was provided to verify consent.",
-                human_review_required=True,
+                human_review_required=False,
                 evidence_a_detail=ads_evidence.detail if ads_evidence else "",
                 evidence_b_detail="No CMP evidence provided.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             )]
 
         # 4. Check for matching purpose
@@ -408,6 +478,7 @@ class AdsMatchVsConsent(ReconciliationRule):
                 human_review_required=False,
                 evidence_a_detail=ads_evidence.detail,
                 evidence_b_detail=cmp_evidence.detail,
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             )]
         else:
             return [ReconciliationFinding(
@@ -418,6 +489,7 @@ class AdsMatchVsConsent(ReconciliationRule):
                 human_review_required=True,
                 evidence_a_detail=ads_evidence.detail,
                 evidence_b_detail=cmp_evidence.detail,
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             )]
 
 
@@ -445,22 +517,30 @@ class GitHubSDKsVsDeclared(ReconciliationRule):
 
     def reconcile(self, evidence_a: list[EvidenceItem], evidence_b: list[EvidenceItem]) -> list[ReconciliationFinding]:
         findings: list[ReconciliationFinding] = []
+        a_ids = [e.source for e in evidence_a]
+        b_ids = [e.source for e in evidence_b]
         if not evidence_a:
             return [ReconciliationFinding(
                 rule_id=self.id, obligation_id="S10.scope.sdks",
                 source_a="github", source_b="scope_sheet",
                 outcome="insufficient_data", confidence=Confidence.LOW,
                 detail="Scope sheet declares marketing platforms, but GitHub integration is not connected to verify SDKs.",
-                human_review_required=True,
+                human_review_required=False,
                 evidence_a_detail="GitHub evidence missing.",
-                evidence_b_detail="Scope sheet platforms provided."
+                evidence_b_detail="Scope sheet platforms provided.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             )]
 
         found_sdks = set()
         for e in evidence_a:
-            if e.raw_metadata and "sdks" in e.raw_metadata:
-                for sdk in e.raw_metadata["sdks"]:
-                    found_sdks.add(sdk.get("sdk", ""))
+            sdk_name = None
+            if e.structured_detail and e.structured_detail.metadata and "sdk" in e.structured_detail.metadata:
+                sdk_name = e.structured_detail.metadata["sdk"]
+            elif e.raw_metadata and "sdk" in e.raw_metadata:
+                sdk_name = e.raw_metadata["sdk"]
+                
+            if sdk_name:
+                found_sdks.add(sdk_name)
 
         if not found_sdks:
             return findings
@@ -481,7 +561,8 @@ class GitHubSDKsVsDeclared(ReconciliationRule):
                 detail=f"GitHub SDKs found ({', '.join(found_sdks)}), but no marketing platforms were declared in scope sheet to verify against.",
                 human_review_required=True,
                 evidence_a_detail=f"SDKs found: {', '.join(found_sdks)}",
-                evidence_b_detail="Scope sheet evidence missing."
+                evidence_b_detail="Scope sheet evidence missing.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             )]
 
         undeclared = []
@@ -499,7 +580,8 @@ class GitHubSDKsVsDeclared(ReconciliationRule):
                 detail=f"SDKs found in code but NOT declared in marketing platforms: {', '.join(undeclared)}.",
                 human_review_required=True,
                 evidence_a_detail=f"SDKs found: {', '.join(found_sdks)}",
-                evidence_b_detail=f"Declared platforms: {', '.join(declared_platforms) if declared_platforms else 'None'}"
+                evidence_b_detail=f"Declared platforms: {', '.join(declared_platforms) if declared_platforms else 'None'}",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             ))
         else:
             findings.append(ReconciliationFinding(
@@ -510,7 +592,8 @@ class GitHubSDKsVsDeclared(ReconciliationRule):
                 detail="All SDKs found in code are properly declared in scope.",
                 human_review_required=False,
                 evidence_a_detail=f"SDKs found: {', '.join(found_sdks)}",
-                evidence_b_detail=f"Declared platforms: {', '.join(declared_platforms)}"
+                evidence_b_detail=f"Declared platforms: {', '.join(declared_platforms)}",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             ))
 
         return findings
@@ -540,6 +623,8 @@ class SCPropertiesVsDeclared(ReconciliationRule):
 
     def reconcile(self, evidence_a: list[EvidenceItem], evidence_b: list[EvidenceItem]) -> list[ReconciliationFinding]:
         findings: list[ReconciliationFinding] = []
+        a_ids = [e.source for e in evidence_a]
+        b_ids = [e.source for e in evidence_b]
         
         if not evidence_a:
             return [ReconciliationFinding(
@@ -547,9 +632,10 @@ class SCPropertiesVsDeclared(ReconciliationRule):
                 source_a="search_console", source_b="scope_sheet",
                 outcome="insufficient_data", confidence=Confidence.LOW,
                 detail="Scope sheet declares properties, but Search Console integration is not connected to verify.",
-                human_review_required=True,
+                human_review_required=False,
                 evidence_a_detail="Search Console evidence missing.",
-                evidence_b_detail="Scope sheet properties provided."
+                evidence_b_detail="Scope sheet properties provided.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             )]
 
         found_properties = set()
@@ -576,7 +662,8 @@ class SCPropertiesVsDeclared(ReconciliationRule):
                 detail=f"Search console verified properties found ({', '.join(found_properties)}), but no properties were declared in scope sheet to verify against.",
                 human_review_required=True,
                 evidence_a_detail=f"Verified properties: {', '.join(found_properties)}",
-                evidence_b_detail="Scope sheet evidence missing."
+                evidence_b_detail="Scope sheet evidence missing.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             )]
                     
         undeclared = []
@@ -593,7 +680,8 @@ class SCPropertiesVsDeclared(ReconciliationRule):
                 detail=f"Properties verified in Search Console but NOT declared in scope: {', '.join(undeclared)}.",
                 human_review_required=True,
                 evidence_a_detail=f"Verified properties: {', '.join(found_properties)}",
-                evidence_b_detail=f"Declared properties: {', '.join(declared_properties) if declared_properties else 'None'}"
+                evidence_b_detail=f"Declared properties: {', '.join(declared_properties) if declared_properties else 'None'}",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             ))
         else:
             findings.append(ReconciliationFinding(
@@ -603,7 +691,8 @@ class SCPropertiesVsDeclared(ReconciliationRule):
                 detail="All properties verified in Search Console are properly declared in scope.",
                 human_review_required=False,
                 evidence_a_detail=f"Verified properties: {', '.join(found_properties)}",
-                evidence_b_detail=f"Declared properties: {', '.join(declared_properties)}"
+                evidence_b_detail=f"Declared properties: {', '.join(declared_properties)}",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             ))
 
         return findings
@@ -633,6 +722,8 @@ class CMPPurposesVsGTMCategories(ReconciliationRule):
 
     def reconcile(self, evidence_a: list[EvidenceItem], evidence_b: list[EvidenceItem]) -> list[ReconciliationFinding]:
         findings: list[ReconciliationFinding] = []
+        a_ids = [e.source for e in evidence_a]
+        b_ids = [e.source for e in evidence_b]
         
         gtm_categories = set()
         gtm_evidence = None
@@ -667,9 +758,10 @@ class CMPPurposesVsGTMCategories(ReconciliationRule):
                 source_a="cmp", source_b="gtm",
                 outcome="insufficient_data", confidence=Confidence.LOW,
                 detail="CMP purposes exist, but GTM integration is not connected to verify categories.",
-                human_review_required=True,
+                human_review_required=False,
                 evidence_a_detail="CMP evidence provided.",
-                evidence_b_detail="GTM evidence missing."
+                evidence_b_detail="GTM evidence missing.",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             )]
 
         if not gtm_categories:
@@ -699,6 +791,7 @@ class CMPPurposesVsGTMCategories(ReconciliationRule):
                 human_review_required=True,
                 evidence_a_detail="No CMP evidence provided.",
                 evidence_b_detail=gtm_evidence.detail if gtm_evidence else "",
+                evidence_a_ids=a_ids, evidence_b_ids=b_ids,
             ))
             return findings
 
@@ -730,6 +823,7 @@ class CMPPurposesVsGTMCategories(ReconciliationRule):
                     human_review_required=False,
                     evidence_a_detail=cmp_evidence.detail,
                     evidence_b_detail=f"GTM tags require: {gtm_cat}",
+                    evidence_a_ids=a_ids, evidence_b_ids=b_ids,
                 ))
             else:
                 findings.append(ReconciliationFinding(
@@ -740,114 +834,11 @@ class CMPPurposesVsGTMCategories(ReconciliationRule):
                     human_review_required=True,
                     evidence_a_detail=cmp_evidence.detail,
                     evidence_b_detail=f"GTM tags require: {gtm_cat}",
+                    evidence_a_ids=a_ids, evidence_b_ids=b_ids,
                 ))
 
         return findings
 
-
-# ── Rule 8: GTM ↔ CMP configuration ──
-class GTMCMPConfigReconciliation(ReconciliationRule):
-    @property
-    def id(self) -> str:
-        return "recon_gtm_cmp_config"
-
-    @property
-    def source_a(self) -> str:
-        return "gtm"
-
-    @property
-    def source_b(self) -> str:
-        return "cmp"
-
-    @property
-    def description(self) -> str:
-        return "GTM Consent Mode configuration vs CMP configuration"
-
-    @property
-    def obligation_ids(self) -> list[str]:
-        return ["S6.consentGating"]
-
-    def reconcile(self, evidence_a: list[EvidenceItem], evidence_b: list[EvidenceItem]) -> list[ReconciliationFinding]:
-        findings: list[ReconciliationFinding] = []
-        
-        if not evidence_a:
-            return [ReconciliationFinding(
-                rule_id=self.id, obligation_id="S6.consentGating",
-                source_a="gtm", source_b="cmp",
-                outcome="insufficient_data", confidence=Confidence.LOW,
-                detail="CMP integration is connected, but GTM integration is not connected to verify consent settings.",
-                human_review_required=True,
-                evidence_a_detail="GTM evidence missing.",
-                evidence_b_detail="CMP evidence provided."
-            )]
-
-        if not evidence_b:
-            return [ReconciliationFinding(
-                rule_id=self.id, obligation_id="S6.consentGating",
-                source_a="gtm", source_b="cmp",
-                outcome="insufficient_data", confidence=Confidence.LOW,
-                detail="GTM tags have Consent Settings enabled, but CMP integration is not connected to verify.",
-                human_review_required=True,
-                evidence_a_detail="GTM evidence provided.",
-                evidence_b_detail="CMP evidence missing."
-            )]
-        
-        gtm_evidence = None
-        gtm_has_consent_settings = False
-        total_tags = 0
-        
-        for e in evidence_a:
-            if e.source == "gtm:tag_analysis" and isinstance(e.raw_metadata, dict):
-                gtm_evidence = e
-                tags = e.raw_metadata.get("tags", [])
-                total_tags += len(tags)
-                if any(t.get("has_consent_settings") for t in tags):
-                    gtm_has_consent_settings = True
-                    
-        # If GTM has no tags at all, we can't evaluate
-        if total_tags == 0:
-            return []
-            
-        cmp_evidence = None
-        cmp_is_configured = False
-        for e in evidence_b:
-            if e.verdict == Verdict.OBSERVED and ("purpose" in e.obligation_id.lower() or "categories" in e.obligation_id.lower()):
-                cmp_evidence = e
-                cmp_is_configured = True
-                break
-
-        if gtm_has_consent_settings and not cmp_is_configured:
-            findings.append(ReconciliationFinding(
-                rule_id=self.id, obligation_id="S6.consentGating",
-                source_a="gtm", source_b="cmp",
-                outcome="contradiction", confidence=Confidence.HIGH,
-                detail="GTM has tags configured with Consent Settings (Consent Mode), but NO CMP is configured to provide those signals.",
-                human_review_required=True,
-                evidence_a_detail=gtm_evidence.detail if gtm_evidence else "GTM tags require consent.",
-                evidence_b_detail="No CMP configuration observed."
-            ))
-        elif cmp_is_configured and not gtm_has_consent_settings:
-            findings.append(ReconciliationFinding(
-                rule_id=self.id, obligation_id="S6.consentGating",
-                source_a="gtm", source_b="cmp",
-                outcome="contradiction", confidence=Confidence.HIGH,
-                detail="CMP is configured and active, but GTM has ZERO tags configured with Consent Settings to respect it.",
-                human_review_required=True,
-                evidence_a_detail="No tags in GTM have consent settings configured.",
-                evidence_b_detail=cmp_evidence.detail if cmp_evidence else "CMP is configured."
-            ))
-        else:
-            findings.append(ReconciliationFinding(
-                rule_id=self.id, obligation_id="S6.consentGating",
-                source_a="gtm", source_b="cmp",
-                outcome="agreement", confidence=Confidence.HIGH,
-                detail="GTM and CMP configuration status are aligned (both configured or both unconfigured).",
-                human_review_required=False,
-                evidence_a_detail="GTM consent settings match CMP presence.",
-                evidence_b_detail="CMP presence matches GTM consent settings."
-            ))
-
-        return findings
 
 # ── Rule Registry ──
 ALL_RECONCILIATION_RULES: list[ReconciliationRule] = [
@@ -858,7 +849,6 @@ ALL_RECONCILIATION_RULES: list[ReconciliationRule] = [
     GitHubSDKsVsDeclared(),
     SCPropertiesVsDeclared(),
     CMPPurposesVsGTMCategories(),
-    GTMCMPConfigReconciliation(),
 ]
 
 

@@ -386,7 +386,7 @@ OBLIGATION_INTEGRATION_MAP: dict[str, list[str]] = {
     "S9.sharing.documented": ["ga4", "google_ads", "meta"],
     "S9.sharing.contractual": [],  # Manual review
     "S9.sharing.audienceUpload": ["google_ads", "meta"],
-    "S9.sharing.enhancedConversions": ["google_ads", "gtm"],
+    "S9.sharing.enhancedConversions": ["google_ads", "gtm", "meta"],
     "S9.sharing.crossDevice": ["ga4"],
     "S9.sharing.serverSide": ["gtm", "meta"],
     "S9.sharing.advancedMatching": ["meta"],
@@ -452,5 +452,14 @@ def validate_obligation_register(register: list[dict] | None = None) -> list[str
 
         if entry["severity"] not in _VALID_SEVERITIES:
             errors.append(f"Entry {i} ({code}): invalid severity '{entry['severity']}'")
+
+    # Validate OBLIGATION_INTEGRATION_MAP against the register
+    for mapped_code, integrations in OBLIGATION_INTEGRATION_MAP.items():
+        if mapped_code not in seen_codes:
+            errors.append(f"Integration map references unknown obligation '{mapped_code}'")
+        if not integrations:
+            # Having an empty list of integrations is allowed (manual review), but 
+            # if we wanted to enforce it we could. For now it's okay.
+            pass
 
     return errors

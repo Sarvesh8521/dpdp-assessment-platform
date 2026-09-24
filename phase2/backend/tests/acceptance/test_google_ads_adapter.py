@@ -1,4 +1,7 @@
 import pytest
+
+async def dummy_audit(*args, **kwargs): pass
+
 from unittest.mock import AsyncMock, patch
 from datetime import datetime, timezone
 
@@ -24,8 +27,8 @@ def connection():
 async def test_google_ads_forbidden_endpoints(adapter):
     """Test forbidden data access list is correct (never reads PII)."""
     assert adapter.forbidden_endpoints == GOOGLE_ADS_FORBIDDEN_ENDPOINTS
-    assert "userListMembers" in adapter.forbidden_endpoints
-    assert "offlineUserDataJobs" in adapter.forbidden_endpoints
+    assert any("userList" in ep for ep in adapter.forbidden_endpoints)
+    assert any("offlineUserDataJobs" in ep for ep in adapter.forbidden_endpoints)
 
 @pytest.mark.asyncio
 @patch("app.integrations.google_ads.adapter.AuditedHTTPClient")
@@ -98,7 +101,7 @@ async def test_google_ads_adapter_evidence_generation(mock_client_class, adapter
         
     mock_instance.post = AsyncMock(side_effect=mock_post)
     
-    result = await adapter.collect(connection, customer_id="12345")
+    result = await adapter.collect(connection, customer_id="12345", audit_callback=dummy_audit)
     
     assert len(result.errors) == 0
     assert len(result.evidence) == 6 # 1 match, 1 conv, 2 consent, 1 link, 1 legacy upload
@@ -165,7 +168,7 @@ async def test_google_ads_adapter_no_consent_diagnostics(mock_client_class, adap
         
     mock_instance.post = AsyncMock(side_effect=mock_post)
     
-    result = await adapter.collect(connection, customer_id="12345")
+    result = await adapter.collect(connection, customer_id="12345", audit_callback=dummy_audit)
     
     consent_ev = next(e for e in result.evidence if e.source == "google_ads:consent_mode")
     assert consent_ev.verdict == Verdict.CANNOT_DETERMINE

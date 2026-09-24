@@ -24,11 +24,7 @@ from app.domain.evidence import StructuredEvidence
 logger = get_logger(__name__)
 
 SC_FORBIDDEN_ENDPOINTS = [
-    "/webmasters/v3/sites/*/searchAnalytics/query",
-    "searchAnalytics",
-    "/v1/urlInspection",
-    "urlInspection",
-    "query",  # Search query data
+    "/searchanalytics/query"
 ]
 
 
@@ -59,41 +55,62 @@ class SearchConsoleAdapter(IntegrationAdapter):
     def forbidden_endpoints(self) -> list[str]:
         return SC_FORBIDDEN_ENDPOINTS
 
-    async def connect(self, credentials: dict[str, Any]) -> ConnectionInfo:
+    async def connect(self, credentials: dict[str, Any], audit_callback: Any) -> ConnectionInfo:
         return ConnectionInfo(
             provider=self.provider, scopes=self.required_scopes,
             connected_at=datetime.now(timezone.utc),
         )
 
-    async def health_check(self, connection: ConnectionInfo) -> HealthStatus:
+    async def health_check(
+        self,
+        connection: ConnectionInfo,
+        audit_callback: Any,
+        *,
+        client_id: str | None = None,
+        assessment_id: str | None = None,
+    ) -> HealthStatus:
         return HealthStatus(
             healthy=True, provider=self.provider,
             message="Connected", checked_at=datetime.now(timezone.utc),
         )
 
     async def collect(
-        self, connection: ConnectionInfo, *,
+        self, connection: ConnectionInfo, audit_callback: Any, *,
         assessment_id: str | None = None, client_id: str | None = None,
-        access_token: str = "", audit_callback: Any = None,
+        access_token: str = "", 
+        property_url: str = "",
     ) -> AdapterResult:
         evidence: list[EvidenceItem] = []
         errors: list[str] = []
         now = datetime.now(timezone.utc)
 
-        # Get the selected property URL (siteUrl) from the connection metadata
-        # The frontend stores it as resource_id or ad_account_id depending on how it's passed
-        meta = connection.metadata or {}
-        site_url = meta.get("resource_id") or ""
+        if not property_url:
+            return AdapterResult(
+                evidence=[EvidenceItem(
+                    obligation_id="S10.scope.properties",
+                    verdict=Verdict.CANNOT_DETERMINE, confidence=Confidence.LOW,
+                    source="search_console:error", observed_at=now,
+                    detail="Missing property URL. Cannot determine Search Console compliance.",
+                    structured_detail=StructuredEvidence(
+                        source="search_console", integration="search_console", operation="auth",
+                        resource_type="property", resource_id="Unavailable",
+                        location="Unavailable",
+                        observed_at=now, observed_state="Missing property URL",
+                        expected_state="Valid property URL",
+                        detail="Missing property URL.",
+                        reason="A selected property URL is required for Search Console assessment.",
+                    ),
+                )],
+                errors=["Missing property URL"], partial=True,
+            )
 
         client = AuditedHTTPClient(
-            provider=self.provider,
-            base_url="https://www.googleapis.com",
+            provider=self.provider, audit_callback=audit_callback, base_url="https://www.googleapis.com",
             access_token=access_token,
             forbidden_endpoints=self.forbidden_endpoints,
             obligations_served=self.obligations_answered,
             client_id=client_id, assessment_id=assessment_id,
-            audit_callback=audit_callback,
-        )
+            )
 
         try:
             # 1. Fetch Verified Properties
@@ -133,43 +150,42 @@ class SearchConsoleAdapter(IntegrationAdapter):
                 errors.append(f"Property discovery failed: {exc}")
                 
             # 2. Fetch Sitemaps for selected property
-            if site_url:
-                from urllib.parse import quote
-                safe_url = quote(site_url, safe='')
-                try:
-                    sitemaps_result = await client.get(
-                        f"/webmasters/v3/sites/{safe_url}/sitemaps", 
-                        operation="list_sitemaps"
+            from urllib.parse import quote
+            safe_url = quote(property_url, safe='')
+            try:
+                sitemaps_result = await client.get(
+                    f"/webmasters/v3/sites/{safe_url}/sitemaps", 
+                    operation="list_sitemaps"
+                )
+                sitemaps = sitemaps_result.get("sitemap", [])
+                sitemap_list = []
+                
+                for sm in sitemaps:
+                    sitemap_list.append({
+                        "path": sm.get("path", ""),
+                        "type": sm.get("type", "Unknown"),
+                        "warnings": sm.get("warnings", 0),
+                        "errors": sm.get("errors", 0),
+                        "isPending": sm.get("isPending", False),
+                        "isSitemapsIndex": sm.get("isSitemapsIndex", False),
+                    })
+                
+                evidence.append(EvidenceItem(
+                    obligation_id="S10.scope.properties",
+                    verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
+                    source=f"search_console:sitemap:{safe_url}", observed_at=now,
+                    detail=f"Sitemaps present: {len(sitemaps)} files.",
+                    structured_detail=StructuredEvidence(
+                        source="search_console", integration="search_console", operation="list_sitemaps",
+                        resource_type="sitemap", resource_id=property_url,
+                        location=f"Property: {property_url}",
+                        observed_at=now, observed_state=f"{len(sitemaps)} sitemaps", expected_state="N/A",
+                        detail=f"Sitemaps present: {len(sitemaps)} files.",
+                        metadata={"sitemaps": sitemap_list}
                     )
-                    sitemaps = sitemaps_result.get("sitemap", [])
-                    sitemap_list = []
-                    
-                    for sm in sitemaps:
-                        sitemap_list.append({
-                            "path": sm.get("path", ""),
-                            "type": sm.get("type", "Unknown"),
-                            "warnings": sm.get("warnings", 0),
-                            "errors": sm.get("errors", 0),
-                            "isPending": sm.get("isPending", False),
-                            "isSitemapsIndex": sm.get("isSitemapsIndex", False),
-                        })
-                    for sm in sitemap_list:
-                        evidence.append(EvidenceItem(
-                            obligation_id="S10.scope.properties",
-                            verdict=Verdict.OBSERVED, confidence=Confidence.HIGH,
-                            source=f"search_console:sitemap:{sm['path']}", observed_at=now,
-                            detail=f"Found sitemap {sm['path']} for property {site_url}.",
-                            structured_detail=StructuredEvidence(
-                                source="search_console", integration="search_console", operation="list_sitemaps",
-                                resource_type="sitemap", resource_id=sm["path"], resource_name=sm["path"],
-                                location=f"Property: {site_url} > Sitemap: {sm['path']}",
-                                observed_at=now, observed_state=sm["type"], expected_state="N/A",
-                                detail=f"Found sitemap {sm['path']} for property {site_url}.",
-                                metadata={"sitemap": sm}
-                            )
-                        ))
-                except ExternalAPIError as exc:
-                    errors.append(f"Sitemap collection failed for {site_url}: {exc}")
+                ))
+            except ExternalAPIError as exc:
+                errors.append(f"Sitemaps fetch failed for {property_url}: {exc}")
 
             return AdapterResult(evidence=evidence, errors=errors)
 

@@ -43,18 +43,32 @@ def _generate_reason(verdict: Verdict | str, structured_detail: dict | None, obl
 
     return f"Observed:\n{obs}\n\nExpected:\n{exp}\n\nReason:\n{reason_text}"
 
-def _generate_recommended_action(verdict: Verdict | str, sources: list[str]) -> str | None:
+def _generate_recommended_action(verdict: Verdict | str, sources: list[str], obligation_code: str | None = "", adapter_action: str | None = None) -> str | None:
     """Generate a concrete recommended action based on the verdict and integration."""
     v_val = verdict.value if hasattr(verdict, "value") else str(verdict)
+    integration = sources[0].split(":")[0].lower() if sources else ""
+    obligation_code = obligation_code or ""
     
     if v_val == Verdict.CANNOT_DETERMINE.value:
-        return "Provide the necessary client authorization and/or resource selection to allow the integration to collect required evidence."
+        provider_name = integration.title() if integration else "the necessary provider"
+        return f"Provide the necessary client authorization and/or resource selection to allow the {provider_name} integration to collect required evidence."
         
     if v_val == Verdict.OBSERVED.value:
-        # Determine primary integration from sources
-        integration = sources[0].split(":")[0].lower() if sources else ""
-        if integration == "gtm":
+        # 1. Use adapter-provided action if available (preserves existing obligation-specific actions)
+        if adapter_action:
+            return adapter_action
+
+        # 2. Obligation-specific actions first
+        if "consentGating" in obligation_code:
             return "Configure the identified tag with the required consent settings."
+        elif "enhancedConversions" in obligation_code:
+            return "Review the identified tag transmitting user data for compliance."
+        elif "tagInventory" in obligation_code:
+            return "Review the tag inventory and remove unused/unapproved tags."
+            
+        # 3. Integration-level fallbacks only if no obligation-specific action exists
+        if integration == "gtm":
+            return "Review the identified GTM configuration."
         elif integration == "ga4":
             return "Review the identified retention configuration and document/revise it as appropriate."
         elif integration in ("google_ads", "googleads"):
@@ -62,7 +76,7 @@ def _generate_recommended_action(verdict: Verdict | str, sources: list[str]) -> 
         elif integration == "meta":
             return "Review the identified audience-sharing or Advanced Matching configuration."
         elif integration == "github":
-            return "Gate SDK initialization behind the consent decision."
+            return "Review the identified code component for compliance."
         elif integration in ("search_console", "google_search_console"):
             return "Add or intentionally exclude the discovered property from scope."
         elif integration in ("cmp", "onetrust"):
@@ -180,6 +194,21 @@ class FindingService:
                 if db_ev.structured_detail:
                     # Update structured_detail in-memory so it goes into finding.evidence_details
                     db_ev.structured_detail["reason"] = ev_reason
+                    db_ev.structured_detail["verdict"] = db_ev.verdict.value if hasattr(db_ev.verdict, "value") else str(db_ev.verdict)
+                    db_ev.structured_detail["confidence"] = db_ev.confidence.value if hasattr(db_ev.confidence, "value") else str(db_ev.confidence)
+                    db_ev.structured_detail["obligation_id"] = str(db_ev.obligation_id)
+                    
+                    adapter_action = db_ev.structured_detail.get("recommended_action")
+                    db_ev.structured_detail["recommended_action"] = _generate_recommended_action(
+                        db_ev.verdict, 
+                        [db_ev.source], 
+                        obligation.code, 
+                        adapter_action=adapter_action
+                    )
+                    
+                    if "location" not in db_ev.structured_detail or db_ev.structured_detail["location"] in ("Unavailable", None, "", "N/A"):
+                        db_ev.structured_detail["location"] = "Not available from provider API"
+                        
                     evidence_details.append(db_ev.structured_detail)
                 else:
                     missing_structured_evidence = True
@@ -191,10 +220,15 @@ class FindingService:
                         "resource_type": "Unknown",
                         "resource_id": "Unknown",
                         "resource_name": "Unknown",
+                        "location": "Not available from provider API",
                         "observed_state": "Unknown",
                         "expected_state": "Unknown",
                         "detail": db_ev.detail or "No detail provided.",
-                        "reason": ev_reason
+                        "reason": ev_reason,
+                        "verdict": db_ev.verdict.value if hasattr(db_ev.verdict, "value") else str(db_ev.verdict),
+                        "confidence": db_ev.confidence.value if hasattr(db_ev.confidence, "value") else str(db_ev.confidence),
+                        "obligation_id": str(db_ev.obligation_id),
+                        "recommended_action": _generate_recommended_action(db_ev.verdict, [db_ev.source], obligation.code)
                     })
             
             finding_reason = "\n\n---\n\n".join(finding_reasons)
@@ -216,7 +250,12 @@ class FindingService:
                 reason=finding_reason,
                 status=FindingStatus.UNDER_REVIEW if human_review else FindingStatus.OPEN,
                 human_review_required=human_review,
-                recommended_action=_generate_recommended_action(verdict, sources),
+                recommended_action=_generate_recommended_action(
+                    verdict, 
+                    sources, 
+                    obligation.code, 
+                    adapter_action=evidence_details[0].get("recommended_action") if evidence_details else None
+                ),
                 evidence_ids=evidence_ids,
                 sources=sources,
                 evidence_details=evidence_details if evidence_details else None,

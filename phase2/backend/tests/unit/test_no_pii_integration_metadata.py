@@ -48,8 +48,7 @@ async def test_integration_status_response_no_pii(mock_get_db_session):
         resource_id="12345",
         resource_name="Google Ads Customer",
         provider_metadata={"setup_action": "connected", "other": "data"},
-        connected_at=None,
-    )
+        connected_at=None)
     
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = [mock_connection]

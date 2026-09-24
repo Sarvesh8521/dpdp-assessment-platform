@@ -56,7 +56,10 @@ async def test_audited_http_client_success_logging():
         mock_response._request = MagicMock()
         mock_request.return_value = mock_response
         
-        async with AuditedHTTPClient(provider="google", audit_callback=mock_callback) as client:
+        async with AuditedHTTPClient(
+            provider="google", audit_callback=mock_callback,
+            client_id=str(uuid.uuid4()), assessment_id=str(uuid.uuid4()), obligations_served=["test"]
+        ) as client:
             result = await client.get("/test-endpoint", operation="test_op")
             assert result == {"data": "test"}
             
@@ -80,7 +83,10 @@ async def test_audited_http_client_failure_logging():
         mock_response._request = MagicMock()
         mock_request.return_value = mock_response
         
-        async with AuditedHTTPClient(provider="meta", audit_callback=mock_callback) as client:
+        async with AuditedHTTPClient(
+            provider="meta", audit_callback=mock_callback,
+            client_id=str(uuid.uuid4()), assessment_id=str(uuid.uuid4()), obligations_served=["test"]
+        ) as client:
             with pytest.raises(ExternalAPIError):
                 await client.get("/restricted-endpoint", operation="restricted_op")
             

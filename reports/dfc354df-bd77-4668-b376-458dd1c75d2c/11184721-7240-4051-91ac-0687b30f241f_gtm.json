@@ -1,0 +1,81 @@
+{
+  "integration": "gtm",
+  "title": "Google Tag Manager Assessment Report",
+  "integration_name": "Google Tag Manager",
+  "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+  "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+  "generated_at": "2026-09-23T11:10:22.441578+00:00",
+  "connection_metadata": {
+    "provider": "gtm",
+    "resource_name": null,
+    "connected_at": null
+  },
+  "summary": {
+    "total_findings": 1,
+    "override_metrics": {
+      "total_actual_findings": 1,
+      "overridden_count": 1,
+      "override_rate": 1.0,
+      "health_warning": true
+    },
+    "high_severity": 1,
+    "medium_severity": 0,
+    "low_severity": 0,
+    "verdicts": {
+      "observed": 1,
+      "not_observed": 0,
+      "cannot_determine": 0
+    },
+    "requires_human_review": 0,
+    "assessment_outcome": "Integration not connected; no provider evidence collected."
+  },
+  "findings": [
+    {
+      "finding_id": "c134aa5e-bd98-4b94-a5f0-f0918d2ee96f",
+      "obligation_id": "POL-1",
+      "obligation_uuid": "02000a0f-d3a6-442b-acb9-e94e548745b0",
+      "obligation_code": "POL-1",
+      "obligation_title": "Privacy Policy",
+      "dpdp_section": "section 1",
+      "verdict": "Observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "overridden",
+      "is_overridden": true,
+      "human_review_required": false,
+      "detail": "detail",
+      "reason": "reason",
+      "compliance_implication": "Compliance info",
+      "recommended_action": null,
+      "sources": [
+        "gtm:123"
+      ],
+      "evidence_details": []
+    }
+  ],
+  "issues": [
+    {
+      "finding_id": "c134aa5e-bd98-4b94-a5f0-f0918d2ee96f",
+      "obligation_id": "POL-1",
+      "obligation_uuid": "02000a0f-d3a6-442b-acb9-e94e548745b0",
+      "obligation_code": "POL-1",
+      "obligation_title": "Privacy Policy",
+      "dpdp_section": "section 1",
+      "verdict": "Observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "overridden",
+      "is_overridden": true,
+      "human_review_required": false,
+      "detail": "detail",
+      "reason": "reason",
+      "compliance_implication": "Compliance info",
+      "recommended_action": null,
+      "sources": [
+        "gtm:123"
+      ],
+      "evidence_details": []
+    }
+  ],
+  "evaluated_obligations": []
+}

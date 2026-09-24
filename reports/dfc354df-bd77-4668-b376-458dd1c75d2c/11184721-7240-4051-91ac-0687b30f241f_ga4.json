@@ -1,0 +1,126 @@
+{
+  "integration": "ga4",
+  "title": "Google Analytics 4 Assessment Report",
+  "integration_name": "Google Analytics 4",
+  "assessment_id": "11184721-7240-4051-91ac-0687b30f241f",
+  "client_id": "dfc354df-bd77-4668-b376-458dd1c75d2c",
+  "generated_at": "2026-09-23T11:10:22.441578+00:00",
+  "connection_metadata": {
+    "provider": "ga4",
+    "resource_name": null,
+    "connected_at": null
+  },
+  "summary": {
+    "total_findings": 2,
+    "override_metrics": {
+      "total_actual_findings": 2,
+      "overridden_count": 1,
+      "override_rate": 0.5,
+      "health_warning": true
+    },
+    "high_severity": 2,
+    "medium_severity": 0,
+    "low_severity": 0,
+    "verdicts": {
+      "observed": 1,
+      "not_observed": 1,
+      "cannot_determine": 0
+    },
+    "requires_human_review": 0,
+    "assessment_outcome": "Integration not connected; no provider evidence collected."
+  },
+  "findings": [
+    {
+      "finding_id": "f6d64e1f-baf5-4786-afe4-698155bbd583",
+      "obligation_id": "TRK-1",
+      "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+      "obligation_code": "TRK-1",
+      "obligation_title": "Restrict Tracking",
+      "dpdp_section": "section 1",
+      "verdict": "Observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "overridden",
+      "is_overridden": true,
+      "human_review_required": false,
+      "detail": "detail",
+      "reason": "reason",
+      "compliance_implication": "Compliance info",
+      "recommended_action": null,
+      "sources": [
+        "ga4:456"
+      ],
+      "evidence_details": []
+    },
+    {
+      "finding_id": "09c0272e-ec35-4d46-9177-a7ed6054eda3",
+      "obligation_id": "TRK-1",
+      "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+      "obligation_code": "TRK-1",
+      "obligation_title": "Restrict Tracking",
+      "dpdp_section": "section 1",
+      "verdict": "Not observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "open",
+      "is_overridden": false,
+      "human_review_required": false,
+      "detail": "detail",
+      "reason": "reason",
+      "compliance_implication": "Compliance info",
+      "recommended_action": null,
+      "sources": [
+        "ga4:789"
+      ],
+      "evidence_details": []
+    }
+  ],
+  "issues": [
+    {
+      "finding_id": "f6d64e1f-baf5-4786-afe4-698155bbd583",
+      "obligation_id": "TRK-1",
+      "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+      "obligation_code": "TRK-1",
+      "obligation_title": "Restrict Tracking",
+      "dpdp_section": "section 1",
+      "verdict": "Observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "overridden",
+      "is_overridden": true,
+      "human_review_required": false,
+      "detail": "detail",
+      "reason": "reason",
+      "compliance_implication": "Compliance info",
+      "recommended_action": null,
+      "sources": [
+        "ga4:456"
+      ],
+      "evidence_details": []
+    }
+  ],
+  "evaluated_obligations": [
+    {
+      "finding_id": "09c0272e-ec35-4d46-9177-a7ed6054eda3",
+      "obligation_id": "TRK-1",
+      "obligation_uuid": "719ec3e7-90bd-4d03-98a0-552d5e150f85",
+      "obligation_code": "TRK-1",
+      "obligation_title": "Restrict Tracking",
+      "dpdp_section": "section 1",
+      "verdict": "Not observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "open",
+      "is_overridden": false,
+      "human_review_required": false,
+      "detail": "detail",
+      "reason": "reason",
+      "compliance_implication": "Compliance info",
+      "recommended_action": null,
+      "sources": [
+        "ga4:789"
+      ],
+      "evidence_details": []
+    }
+  ]
+}

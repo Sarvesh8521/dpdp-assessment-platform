@@ -14,9 +14,10 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Index, String
 from sqlalchemy.dialects.postgresql import JSON, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.security.pii_sanitizer import sanitize_dict
 
 
 class ConnectionStatus(str, enum.Enum):
@@ -70,6 +71,10 @@ class Connection(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Relationships
     client = relationship("Client", back_populates="connections")
+
+    @validates("provider_metadata")
+    def sanitize_metadata(self, key, value):
+        return sanitize_dict(value) if value else value
 
     __table_args__ = (
         Index("ix_connections_client_id", "client_id"),

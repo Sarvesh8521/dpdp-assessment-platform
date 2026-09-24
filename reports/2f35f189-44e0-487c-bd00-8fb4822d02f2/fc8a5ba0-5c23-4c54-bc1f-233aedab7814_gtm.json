@@ -1,0 +1,91 @@
+{
+  "integration": "gtm",
+  "title": "Google Tag Manager Assessment Report",
+  "integration_name": "Google Tag Manager",
+  "assessment_id": "fc8a5ba0-5c23-4c54-bc1f-233aedab7814",
+  "client_id": "2f35f189-44e0-487c-bd00-8fb4822d02f2",
+  "generated_at": "2026-09-23T11:16:29.249502+00:00",
+  "connection_metadata": {
+    "provider": "gtm",
+    "resource_name": null,
+    "connected_at": null
+  },
+  "summary": {
+    "total_findings": 1,
+    "override_metrics": {
+      "total_actual_findings": 1,
+      "overridden_count": 0,
+      "override_rate": 0.0,
+      "health_warning": false
+    },
+    "high_severity": 0,
+    "medium_severity": 0,
+    "low_severity": 1,
+    "verdicts": {
+      "observed": 0,
+      "not_observed": 0,
+      "cannot_determine": 1
+    },
+    "requires_human_review": 1,
+    "assessment_outcome": "Integration not connected; no provider evidence collected."
+  },
+  "findings": [
+    {
+      "finding_id": "9198e097-9a5d-4a66-bf73-4c9ee1d28062",
+      "obligation_id": "OBL-2",
+      "obligation_uuid": "e64e7c01-fd80-4e56-b2b4-d23108d3aeb6",
+      "obligation_code": "OBL-2",
+      "obligation_title": "GTM Rule",
+      "dpdp_section": null,
+      "verdict": "Cannot determine",
+      "confidence": "low",
+      "severity": "low",
+      "status": "open",
+      "is_overridden": false,
+      "human_review_required": true,
+      "detail": "Missing data in GTM",
+      "reason": null,
+      "compliance_implication": "Pending legal review to determine compliance implications.",
+      "recommended_action": null,
+      "sources": [
+        "gtm:workspaces"
+      ],
+      "evidence_details": [
+        {
+          "source": "gtm:workspaces",
+          "detail": "foo"
+        }
+      ]
+    }
+  ],
+  "issues": [],
+  "evaluated_obligations": [
+    {
+      "finding_id": "9198e097-9a5d-4a66-bf73-4c9ee1d28062",
+      "obligation_id": "OBL-2",
+      "obligation_uuid": "e64e7c01-fd80-4e56-b2b4-d23108d3aeb6",
+      "obligation_code": "OBL-2",
+      "obligation_title": "GTM Rule",
+      "dpdp_section": null,
+      "verdict": "Cannot determine",
+      "confidence": "low",
+      "severity": "low",
+      "status": "open",
+      "is_overridden": false,
+      "human_review_required": true,
+      "detail": "Missing data in GTM",
+      "reason": null,
+      "compliance_implication": "Pending legal review to determine compliance implications.",
+      "recommended_action": null,
+      "sources": [
+        "gtm:workspaces"
+      ],
+      "evidence_details": [
+        {
+          "source": "gtm:workspaces",
+          "detail": "foo"
+        }
+      ]
+    }
+  ]
+}

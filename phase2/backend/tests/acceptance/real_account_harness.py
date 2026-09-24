@@ -18,6 +18,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pprint import pprint
+from typing import Any
 
 from sqlalchemy import select
 
@@ -71,36 +72,71 @@ async def run_harness(adapter_id: str, client_id_str: str | None, assessment_id_
     mock_secret_manager = AsyncMock()
     mock_secret_manager.get_secret.return_value = token
     
-    # Run the adapter collect method within a transaction that we will rollback
     async with async_session_factory() as session:
         async with session.begin(): # Start a transaction
             try:
-                with patch("app.services.assessment_service.get_secret_manager", return_value=mock_secret_manager):
-                    # In order to let the adapter use the audited client, it usually expects the
-                    # connection to be set up. Some adapters might need specific args.
-                    # We will just call adapter.collect(conn_info)
+                # We will provide an audit callback to print API calls
+                def harness_audit_callback(entry: dict[str, Any]):
+                    print(f"[AUDIT] {entry.get('method')} {entry.get('url')} - {entry.get('status_code')} (Elapsed: {entry.get('duration_ms')}ms)")
+                
+                kwargs = {
+                    "access_token": token,
+                    "assessment_id": str(assessment_id),
+                    "client_id": str(client_id),
+                    "audit_callback": harness_audit_callback,
+                }
+                
+                resource_id = getattr(args, "resource_id", None)
+                if resource_id:
+                    conn_info.account_id = resource_id
+                    conn_info.metadata["resource_id"] = resource_id
+                
+                if adapter_id == "google_ads" and resource_id:
+                    kwargs["customer_id"] = resource_id
+                elif adapter_id == "meta" and resource_id:
+                    kwargs["business_id"] = resource_id
+                    conn_info.metadata["business_id"] = resource_id
+                elif adapter_id == "github" and resource_id:
+                    kwargs["repositories"] = [resource_id]
+                elif adapter_id in ("search_console", "google_search_console") and resource_id:
+                    kwargs["property_url"] = resource_id
+                
+                print("\n--- Executing Adapter Collection ---")
+                
+                # Run the adapter collect method
+                result = await adapter.collect(
+                    connection=conn_info,
+                    **kwargs
+                )
+                
+                print("\n--- Collection Results ---")
+                print(f"Partial Failure: {result.partial}")
+                if result.errors:
+                    print(f"Errors: {result.errors}")
+                if result.warnings:
+                    print(f"Warnings: {result.warnings}")
                     
-                    # Wait, adapter.collect doesn't usually take the raw token directly, 
-                    # but typically adapters construct an AuditedHTTPClient. Wait, no.
-                    # Looking at phase 2 architecture, the assessment orchestrator 
-                    # provides the connection. Let's see how adapters authenticate.
-                    # Usually `adapter.collect` is called by `AssessmentService` which handles tokens.
-                    # Actually, we need to look at how `adapter.collect` is implemented.
-                    # Often it takes a `ConnectionInfo` and might rely on a passed `AuditedHTTPClient`
-                    # or it initializes it. We might need to mock the client creation.
-                    pass
+                print(f"\nEvidence Collected ({len(result.evidence)} items):")
+                for item in result.evidence:
+                    print(f"\n- Obligation: {item.obligation_id}")
+                    print(f"  Verdict:    {item.verdict.value}")
+                    print(f"  Confidence: {item.confidence.value}")
+                    print(f"  Source:     {item.source}")
+                    print(f"  Detail:     {item.detail}")
+                    if item.structured_detail:
+                        print(f"  Structured: {item.structured_detail.operation} on {item.structured_detail.resource_type}")
+                
             except Exception as e:
                 print(f"[FAIL] Exception during setup/execution: {e}")
-                raise
+                import traceback
+                traceback.print_exc()
                 
-    # We need a generic way to run this. To avoid complex patching, we can mock 
-    # the AuditedHTTPClient's _resolve_access_token if it exists, or just pass the token 
-    # if the adapter accepts it.
+            finally:
+                # We intentionally raise an exception to rollback the transaction
+                # just to ensure absolutely nothing was committed.
+                await session.rollback()
     
     print("\n--- Execution Complete ---")
-    print("WARNING: This harness is currently a skeleton. To fully execute adapters,")
-    print("it needs to correctly inject the `HARNESS_ACCESS_TOKEN` into the specific adapter's client.")
-    print("Review adapter implementations and update `real_account_harness.py` patching accordingly.")
 
 
 if __name__ == "__main__":
@@ -108,6 +144,7 @@ if __name__ == "__main__":
     parser.add_argument("--adapter", required=True, help="Adapter ID (e.g., gtm, ga4, google_ads)")
     parser.add_argument("--client-id", help="Optional Client ID UUID")
     parser.add_argument("--assessment-id", help="Optional Assessment ID UUID")
+    parser.add_argument("--resource-id", help="Optional Resource ID (e.g. Container ID, Property URL)")
     args = parser.parse_args()
 
     asyncio.run(run_harness(args.adapter, args.client_id, args.assessment_id))

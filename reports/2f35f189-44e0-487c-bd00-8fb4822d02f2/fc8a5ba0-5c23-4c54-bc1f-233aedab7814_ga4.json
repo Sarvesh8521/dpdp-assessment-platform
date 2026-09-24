@@ -1,0 +1,91 @@
+{
+  "integration": "ga4",
+  "title": "Google Analytics 4 Assessment Report",
+  "integration_name": "Google Analytics 4",
+  "assessment_id": "fc8a5ba0-5c23-4c54-bc1f-233aedab7814",
+  "client_id": "2f35f189-44e0-487c-bd00-8fb4822d02f2",
+  "generated_at": "2026-09-23T11:16:29.249502+00:00",
+  "connection_metadata": {
+    "provider": "ga4",
+    "resource_name": null,
+    "connected_at": null
+  },
+  "summary": {
+    "total_findings": 1,
+    "override_metrics": {
+      "total_actual_findings": 1,
+      "overridden_count": 0,
+      "override_rate": 0.0,
+      "health_warning": false
+    },
+    "high_severity": 1,
+    "medium_severity": 0,
+    "low_severity": 0,
+    "verdicts": {
+      "observed": 1,
+      "not_observed": 0,
+      "cannot_determine": 0
+    },
+    "requires_human_review": 0,
+    "assessment_outcome": "Integration not connected; no provider evidence collected."
+  },
+  "findings": [
+    {
+      "finding_id": "613a0b0e-7a95-45cd-8ab5-6b2325b947ea",
+      "obligation_id": "OBL-1",
+      "obligation_uuid": "9c31b231-b46f-4806-bf34-116145906007",
+      "obligation_code": "OBL-1",
+      "obligation_title": "GA4 Rule",
+      "dpdp_section": null,
+      "verdict": "Observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "open",
+      "is_overridden": false,
+      "human_review_required": false,
+      "detail": "A real issue in GA4",
+      "reason": null,
+      "compliance_implication": "Pending legal review to determine compliance implications.",
+      "recommended_action": null,
+      "sources": [
+        "ga4:settings"
+      ],
+      "evidence_details": [
+        {
+          "source": "ga4:settings",
+          "detail": "foo"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "finding_id": "613a0b0e-7a95-45cd-8ab5-6b2325b947ea",
+      "obligation_id": "OBL-1",
+      "obligation_uuid": "9c31b231-b46f-4806-bf34-116145906007",
+      "obligation_code": "OBL-1",
+      "obligation_title": "GA4 Rule",
+      "dpdp_section": null,
+      "verdict": "Observed",
+      "confidence": "high",
+      "severity": "high",
+      "status": "open",
+      "is_overridden": false,
+      "human_review_required": false,
+      "detail": "A real issue in GA4",
+      "reason": null,
+      "compliance_implication": "Pending legal review to determine compliance implications.",
+      "recommended_action": null,
+      "sources": [
+        "ga4:settings"
+      ],
+      "evidence_details": [
+        {
+          "source": "ga4:settings",
+          "detail": "foo"
+        }
+      ]
+    }
+  ],
+  "evaluated_obligations": []
+}

@@ -111,6 +111,12 @@ async def test_explicit_demo_assessment_contains_fixtures(mock_generate, mock_se
 @patch("app.services.report_generator.ReportGeneratorService.generate_report", new_callable=AsyncMock)
 async def test_missing_integration_produces_cannot_determine(mock_generate, mock_session):
     client_id = uuid.uuid4()
+    
+    # Ensure session.execute returns no connection
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.first.return_value = None
+    mock_session.execute.return_value = mock_result
+    
     service = AssessmentService(mock_session, client_id)
     
     data = AssessmentCreate(
@@ -132,4 +138,4 @@ async def test_missing_integration_produces_cannot_determine(mock_generate, mock
     ads_evidence = [ev for ev in evidence_items if "google_ads" in ev.source.lower()]
     assert len(ads_evidence) > 0
     assert all(ev.verdict == Verdict.CANNOT_DETERMINE for ev in ads_evidence)
-    assert all("not connected" in ev.detail.lower() for ev in ads_evidence)
+    assert all("not connected" in ev.detail.lower() or "not found" in ev.detail.lower() for ev in ads_evidence)

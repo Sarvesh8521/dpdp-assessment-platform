@@ -23,14 +23,12 @@ from app.domain.evidence import StructuredEvidence
 logger = get_logger(__name__)
 
 CMP_FORBIDDEN_ENDPOINTS = [
-    # Individual consent records — the sharpest instance of the rule
-    "consent-receipts$",
+    "^/api/v1/consent-receipts$",
+    "^/api/v1/consent-records$",
+    "^/api/v1/consentRecords$",
+    "^/api/individual-consent",
     "consent-records",
-    "individual-consent",
-    "consent/receipts",
-    "/api/consentreceipts",
-    "user-consent",
-    "consentRecords",
+    "data-subjects"
 ]
 
 
@@ -105,19 +103,28 @@ class OneTrustAdapter(BaseCMPAdapter):
     def required_scopes(self) -> list[str]:
         return ["onetrust:read"]
 
-    async def connect(self, credentials: dict[str, Any]) -> ConnectionInfo:
+    async def connect(self, credentials: dict[str, Any], audit_callback: Any) -> ConnectionInfo:
         return ConnectionInfo(
             provider=self.provider, scopes=self.required_scopes,
             connected_at=datetime.now(timezone.utc),
         )
 
-    async def health_check(self, connection: ConnectionInfo) -> HealthStatus:
+    async def health_check(
+        self,
+        connection: ConnectionInfo,
+        audit_callback: Any,
+        *,
+        client_id: str | None = None,
+        assessment_id: str | None = None,
+    ) -> HealthStatus:
         # Validate real access for OneTrust
         client = AuditedHTTPClient(
-            provider=self.provider, base_url="https://api.onetrust.com",
+            provider=self.provider, audit_callback=audit_callback, base_url="https://api.onetrust.com",
             access_token=connection.metadata.get("access_token", ""),
             forbidden_endpoints=self.forbidden_endpoints,
             obligations_served=self.obligations_answered,
+            client_id=client_id,
+            assessment_id=assessment_id or "system",
         )
         try:
             await client.get("/api/v1/purposes", operation="health_check")
@@ -135,22 +142,21 @@ class OneTrustAdapter(BaseCMPAdapter):
             await client.close()
 
     async def collect(
-        self, connection: ConnectionInfo, *,
+        self, connection: ConnectionInfo, audit_callback: Any, *,
         assessment_id: str | None = None, client_id: str | None = None,
-        access_token: str = "", audit_callback: Any = None,
+        access_token: str = "", 
     ) -> AdapterResult:
         evidence: list[EvidenceItem] = []
         errors: list[str] = []
         now = datetime.now(timezone.utc)
 
         client = AuditedHTTPClient(
-            provider=self.provider, base_url="https://api.onetrust.com",
+            provider=self.provider, audit_callback=audit_callback, base_url="https://api.onetrust.com",
             access_token=access_token,
             forbidden_endpoints=self.forbidden_endpoints,
             obligations_served=self.obligations_answered,
             client_id=client_id, assessment_id=assessment_id,
-            audit_callback=audit_callback,
-        )
+            )
 
         try:
             # Purposes
@@ -291,22 +297,29 @@ class CookieYesAdapter(BaseCMPAdapter):
     def required_scopes(self) -> list[str]:
         return ["cookieyes:read"]
 
-    async def connect(self, credentials: dict[str, Any]) -> ConnectionInfo:
+    async def connect(self, credentials: dict[str, Any], audit_callback: Any) -> ConnectionInfo:
         return ConnectionInfo(
             provider=self.provider, scopes=self.required_scopes,
             connected_at=datetime.now(timezone.utc),
         )
 
-    async def health_check(self, connection: ConnectionInfo) -> HealthStatus:
+    async def health_check(
+        self,
+        connection: ConnectionInfo,
+        audit_callback: Any,
+        *,
+        client_id: str | None = None,
+        assessment_id: str | None = None,
+    ) -> HealthStatus:
         return HealthStatus(
             healthy=False, provider=self.provider,
             message="Provider API is unsupported for automated metadata extraction.", checked_at=datetime.now(timezone.utc),
         )
 
     async def collect(
-        self, connection: ConnectionInfo, *,
+        self, connection: ConnectionInfo, audit_callback: Any, *,
         assessment_id: str | None = None, client_id: str | None = None,
-        access_token: str = "", audit_callback: Any = None,
+        access_token: str = "", 
     ) -> AdapterResult:
         evidence: list[EvidenceItem] = []
         now = datetime.now(timezone.utc)
@@ -341,22 +354,29 @@ class SecuritiAdapter(BaseCMPAdapter):
     def required_scopes(self) -> list[str]:
         return ["securiti:read"]
 
-    async def connect(self, credentials: dict[str, Any]) -> ConnectionInfo:
+    async def connect(self, credentials: dict[str, Any], audit_callback: Any) -> ConnectionInfo:
         return ConnectionInfo(
             provider=self.provider, scopes=self.required_scopes,
             connected_at=datetime.now(timezone.utc),
         )
 
-    async def health_check(self, connection: ConnectionInfo) -> HealthStatus:
+    async def health_check(
+        self,
+        connection: ConnectionInfo,
+        audit_callback: Any,
+        *,
+        client_id: str | None = None,
+        assessment_id: str | None = None,
+    ) -> HealthStatus:
         return HealthStatus(
             healthy=False, provider=self.provider,
             message="Provider API is unsupported for automated metadata extraction.", checked_at=datetime.now(timezone.utc),
         )
 
     async def collect(
-        self, connection: ConnectionInfo, *,
+        self, connection: ConnectionInfo, audit_callback: Any, *,
         assessment_id: str | None = None, client_id: str | None = None,
-        access_token: str = "", audit_callback: Any = None,
+        access_token: str = "", 
     ) -> AdapterResult:
         evidence: list[EvidenceItem] = []
         now = datetime.now(timezone.utc)

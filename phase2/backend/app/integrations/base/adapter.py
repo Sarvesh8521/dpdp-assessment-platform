@@ -104,20 +104,28 @@ class IntegrationAdapter(abc.ABC):
         return frozenset()
 
     @abc.abstractmethod
-    async def connect(self, credentials: dict[str, Any]) -> ConnectionInfo:
+    async def connect(self, credentials: dict[str, Any], audit_callback: Any) -> ConnectionInfo:
         """Establish connection with the external service.
 
         Must verify scopes and fail if required read-only scopes are missing.
         """
 
     @abc.abstractmethod
-    async def health_check(self, connection: ConnectionInfo) -> HealthStatus:
+    async def health_check(
+        self,
+        connection: ConnectionInfo,
+        audit_callback: Any,
+        *,
+        client_id: str | None = None,
+        assessment_id: str | None = None,
+    ) -> HealthStatus:
         """Check the health of an established connection."""
 
     @abc.abstractmethod
     async def collect(
         self,
         connection: ConnectionInfo,
+        audit_callback: Any,
         *,
         assessment_id: str | None = None,
         client_id: str | None = None,

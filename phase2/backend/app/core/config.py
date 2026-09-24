@@ -110,7 +110,7 @@ class Settings(BaseSettings):
 
     # ── Engagement / Time-boxing ──
     default_token_lifetime_days: int = 90
-    default_evidence_retention_days: int = 90
+    default_evidence_retention_days: int = 30
 
     # ── Rate Limiting ──
     rate_limit_requests: int = 100

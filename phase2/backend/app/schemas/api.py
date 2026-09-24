@@ -155,10 +155,14 @@ class IntegrationStatusItem(BaseModel):
     resource_name: str | None = None
     resource_selected: bool = False
     requires_resource_selection: bool = True
-    account_email: str | None = None
-    account_name: str | None = None
     connected_at: datetime | None = None
     error: str | None = None
+    provider_metadata: dict[str, Any] | None = None
+
+
+class SelectResourcePayload(BaseModel):
+    """Payload for resource selection with extra metadata."""
+    provider_metadata: dict[str, Any] | None = None
 
 
 class IntegrationStatusResponse(BaseModel):
@@ -193,6 +197,7 @@ class AssessmentConfig(BaseModel):
     declared_properties: list[str] | None = None
     cmp_provider: str | None = None
     is_demo: bool = False
+    phase1_results: list[dict[str, Any]] | None = None
 
 
 class AssessmentCreate(BaseModel):

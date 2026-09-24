@@ -14,9 +14,10 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.db.base import Base, UUIDPrimaryKeyMixin
+from app.security.pii_sanitizer import sanitize_dict, sanitize_string
 
 
 class AuditLog(Base, UUIDPrimaryKeyMixin):
@@ -57,6 +58,14 @@ class AuditLog(Base, UUIDPrimaryKeyMixin):
 
     # Correlation
     request_id: Mapped[str | None] = mapped_column(String(100))
+
+    @validates("error_detail", "endpoint", "operation")
+    def sanitize_strings(self, key, value):
+        return sanitize_string(value) if value else value
+
+    @validates("request_metadata")
+    def sanitize_dicts(self, key, value):
+        return sanitize_dict(value) if value else value
 
     __table_args__ = (
         Index("ix_audit_logs_client_id", "client_id"),

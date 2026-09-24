@@ -4,6 +4,9 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
+async def dummy_audit(*args, **kwargs): pass
+
+
 from app.db.models.client import Client
 from app.db.models.assessment import Assessment
 from app.db.models.connection import Connection, ConnectionStatus
@@ -45,8 +48,7 @@ def _setup_mock_connection(mock_session, provider, resource_id="res-123"):
         status=ConnectionStatus.CONNECTED,
         resource_id=resource_id,
         resource_name="Test Resource",
-        secret_ref="fake-secret-ref",
-    )
+        secret_ref="fake-secret-ref")
     mock_result = MagicMock()
     mock_result.scalars.return_value.first.return_value = mock_conn
     
@@ -64,7 +66,7 @@ async def test_execution_connected_gtm_collects(
     mock_recon, mock_gen_findings, mock_gen_report, mock_get_adapter, 
     mock_session, mock_secret_manager
 ):
-    """Test connected GTM calls adapter.collect() with correct access token."""
+    """Test connected GTM calls adapter.collect(audit_callback=dummy_audit) with correct access token."""
     mock_adapter = AsyncMock()
     mock_adapter.id = "gtm"
     mock_adapter.provider = "gtm"
@@ -126,18 +128,18 @@ async def test_execution_google_ads_receives_customer_id(
 @patch("app.services.report_generator.ReportGeneratorService.generate_report", new_callable=AsyncMock)
 @patch("app.services.finding_service.FindingService.generate_findings_for_assessment", new_callable=AsyncMock)
 @patch("app.services.assessment_service.run_reconciliation")
-async def test_execution_meta_receives_ad_account_id(
+async def test_execution_meta_receives_business_id(
     mock_recon, mock_gen_findings, mock_gen_report, mock_get_adapter, 
     mock_session, mock_secret_manager
 ):
-    """Test connected Meta receives ad_account_id kwarg."""
+    """Test connected Meta receives business_id kwarg."""
     mock_adapter = AsyncMock()
     mock_adapter.id = "meta"
     mock_adapter.provider = "meta"
     mock_adapter.collect.return_value = AdapterResult(evidence=[])
     mock_get_adapter.return_value = mock_adapter
 
-    _setup_mock_connection(mock_session, "meta", resource_id="act_123")
+    _setup_mock_connection(mock_session, "meta", resource_id="biz_123")
     client_id = uuid.uuid4()
     service = AssessmentService(mock_session, client_id)
     
@@ -150,8 +152,8 @@ async def test_execution_meta_receives_ad_account_id(
     
     mock_adapter.collect.assert_called_once()
     kwargs = mock_adapter.collect.call_args.kwargs
-    assert "ad_account_id" in kwargs
-    assert kwargs["ad_account_id"] == "act_123"
+    assert "business_id" in kwargs
+    assert kwargs["business_id"] == "biz_123"
 
 
 @pytest.mark.asyncio
@@ -228,7 +230,7 @@ async def test_execution_connected_no_resource_produces_cannot_determine(
     assert ev.source == "ga4:no_resource"
     ev_verdict_val = ev.verdict.value if hasattr(ev.verdict, "value") else str(ev.verdict)
     assert ev_verdict_val == "Cannot determine"
-    assert "no assessment resource has been selected" in ev.detail
+    assert "was not selected" in ev.detail
 
 
 @pytest.mark.asyncio

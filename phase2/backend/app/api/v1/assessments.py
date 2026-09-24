@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.auth.dependencies import AuthContext, get_current_user
+from app.auth.dependencies import AuthContext, get_current_user, apply_client_isolation
 from app.db.session import get_db_session
 from app.db.models.assessment import Assessment
 from app.db.models.finding import Finding
@@ -45,9 +45,7 @@ async def list_assessments(
         return {"items": [], "total": 0, "page": 1, "size": 50, "has_more": False}
         
     result = await session.execute(
-        select(Assessment)
-        .where(Assessment.client_id.in_([uuid.UUID(c) for c in client_ids]))
-        .options(selectinload(Assessment.runs))
+        apply_client_isolation(select(Assessment), Assessment, auth).options(selectinload(Assessment.runs))
         .order_by(Assessment.created_at.desc())
     )
     assessments = result.scalars().all()
@@ -89,12 +87,7 @@ async def get_assessment(
 ) -> Any:
     """Get assessment details."""
     result = await session.execute(
-        select(Assessment)
-        .where(
-            Assessment.id == assessment_id,
-            Assessment.client_id.in_([uuid.UUID(c) for c in auth.get_accessible_client_ids()])
-        )
-        .options(selectinload(Assessment.runs))
+        apply_client_isolation(select(Assessment).where(Assessment.id == assessment_id), Assessment, auth).options(selectinload(Assessment.runs))
     )
     assessment = result.scalar_one_or_none()
     if not assessment:
@@ -112,11 +105,7 @@ async def get_assessment_findings(
 ) -> Any:
     """Get findings for a specific assessment with resolved obligation metadata."""
     result = await session.execute(
-        select(Finding)
-        .where(
-            Finding.assessment_id == assessment_id,
-            Finding.client_id.in_([uuid.UUID(c) for c in auth.get_accessible_client_ids()])
-        )
+        apply_client_isolation(select(Finding).where(Finding.assessment_id == assessment_id), Finding, auth)
         .options(selectinload(Finding.overrides))
     )
     findings = result.scalars().all()
@@ -164,10 +153,7 @@ async def get_assessment_report_json(
     from pathlib import Path
 
     result = await session.execute(
-        select(Assessment).where(
-            Assessment.id == assessment_id,
-            Assessment.client_id.in_([uuid.UUID(c) for c in auth.get_accessible_client_ids()])
-        )
+        apply_client_isolation(select(Assessment).where(Assessment.id == assessment_id), Assessment, auth)
     )
     assessment = result.scalar_one_or_none()
     if not assessment:
@@ -256,10 +242,7 @@ async def get_assessment_report_pdf(
     from pathlib import Path
 
     result = await session.execute(
-        select(Assessment).where(
-            Assessment.id == assessment_id,
-            Assessment.client_id.in_([uuid.UUID(c) for c in auth.get_accessible_client_ids()])
-        )
+        apply_client_isolation(select(Assessment).where(Assessment.id == assessment_id), Assessment, auth)
     )
     assessment = result.scalar_one_or_none()
     if not assessment:
@@ -323,10 +306,7 @@ async def download_assessment_report(
     from pathlib import Path
 
     result = await session.execute(
-        select(Assessment).where(
-            Assessment.id == assessment_id,
-            Assessment.client_id.in_([uuid.UUID(c) for c in auth.get_accessible_client_ids()])
-        )
+        apply_client_isolation(select(Assessment).where(Assessment.id == assessment_id), Assessment, auth)
     )
     assessment = result.scalar_one_or_none()
     if not assessment:

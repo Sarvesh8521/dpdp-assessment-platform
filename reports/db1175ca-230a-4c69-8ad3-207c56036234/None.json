@@ -1,0 +1,67 @@
+{
+  "assessment_id": "None",
+  "client_id": "db1175ca-230a-4c69-8ad3-207c56036234",
+  "generated_at": "2026-09-23T11:10:22.663350+00:00",
+  "status": "COMPLETED",
+  "summary": {
+    "total_findings": 0,
+    "override_metrics": {
+      "total_actual_findings": 0,
+      "overridden_count": 0,
+      "override_rate": 0.0,
+      "health_warning": false,
+      "by_obligation": {}
+    },
+    "high_severity": 0,
+    "medium_severity": 0,
+    "low_severity": 0,
+    "requires_human_review": 0,
+    "verdicts": {
+      "observed": 0,
+      "not_observed": 0,
+      "cannot_determine": 0
+    },
+    "reconciliations_count": 0,
+    "reconciliation_contradictions": 0,
+    "integrations_assessed": [],
+    "assessment_outcome": "No issues found across all assessed obligations."
+  },
+  "selected_integrations": [],
+  "combined_report": {
+    "title": "Digital Personal Data Protection (DPDP) - Comprehensive Assessment Report",
+    "assessment_id": "None",
+    "client_id": "db1175ca-230a-4c69-8ad3-207c56036234",
+    "generated_at": "2026-09-23T11:10:22.663350+00:00",
+    "status": "COMPLETED",
+    "summary": {
+      "total_findings": 0,
+      "override_metrics": {
+        "total_actual_findings": 0,
+        "overridden_count": 0,
+        "override_rate": 0.0,
+        "health_warning": false,
+        "by_obligation": {}
+      },
+      "high_severity": 0,
+      "medium_severity": 0,
+      "low_severity": 0,
+      "requires_human_review": 0,
+      "verdicts": {
+        "observed": 0,
+        "not_observed": 0,
+        "cannot_determine": 0
+      },
+      "reconciliations_count": 0,
+      "reconciliation_contradictions": 0,
+      "integrations_assessed": [],
+      "assessment_outcome": "No issues found across all assessed obligations."
+    },
+    "selected_integrations": [],
+    "individual_reports": {},
+    "integration_reports": [],
+    "cross_source_reconciliation": []
+  },
+  "individual_reports": {},
+  "findings": [],
+  "reconciliations": []
+}

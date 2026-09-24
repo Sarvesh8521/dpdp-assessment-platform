@@ -1,0 +1,35 @@
+{
+  "integration": "ga4",
+  "title": "Google Analytics 4 Assessment Report",
+  "integration_name": "Google Analytics 4",
+  "assessment_id": "2e947cae-1dcf-4cc5-9cc7-393a1b582683",
+  "client_id": "41bb69b9-1d73-4bab-890f-4b8ba4c2a525",
+  "generated_at": "2026-09-23T11:10:10.719224+00:00",
+  "connection_metadata": {
+    "provider": "ga4",
+    "resource_name": null,
+    "connected_at": null
+  },
+  "summary": {
+    "total_findings": 0,
+    "override_metrics": {
+      "total_actual_findings": 0,
+      "overridden_count": 0,
+      "override_rate": 0.0,
+      "health_warning": false
+    },
+    "high_severity": 0,
+    "medium_severity": 0,
+    "low_severity": 0,
+    "verdicts": {
+      "observed": 0,
+      "not_observed": 0,
+      "cannot_determine": 0
+    },
+    "requires_human_review": 0,
+    "assessment_outcome": "Integration not connected; no provider evidence collected."
+  },
+  "findings": [],
+  "issues": [],
+  "evaluated_obligations": []
+}
